@@ -22,6 +22,7 @@ typedef int pid_t;
 #define SYS_exit 60
 #define SYS_wait4 61
 #define SYS_kill 62
+#define SYS_getcwd 79
 #define SYS_chdir 80
 #define SYS_setpgid 109
 #define SYS_getpgrp 111
@@ -48,6 +49,7 @@ pid_t sys_fork(void);
 int sys_execve(const char *filename, char *const argv[], char *const envp[]);
 void sys_exit(int status);
 pid_t sys_wait4(pid_t pid, int *wstatus, int options, void *rusage);
+int sys_getcwd(char *buf, size_t size);
 int sys_chdir(const char *path);
 int sys_kill(pid_t pid, int sig);
 int sys_getdents64(unsigned int fd, void *dirp, unsigned int count);

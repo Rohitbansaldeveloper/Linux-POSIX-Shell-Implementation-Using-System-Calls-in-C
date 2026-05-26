@@ -65,3 +65,18 @@ int set_env_val(const char *name, const char *value) {
     
     return -1; // Full
 }
+
+int unset_env_val(const char *name) {
+    size_t len = str_len(name);
+    for (int i = 0; i < env_count; i++) {
+        if (str_ncmp(dynamic_env[i], name, len) == 0 && dynamic_env[i][len] == '=') {
+            for (int j = i; j < env_count - 1; j++) {
+                dynamic_env[j] = dynamic_env[j + 1];
+            }
+            env_count--;
+            dynamic_env[env_count] = NULL;
+            return 0;
+        }
+    }
+    return -1;
+}

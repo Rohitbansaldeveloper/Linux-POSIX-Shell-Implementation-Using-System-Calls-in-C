@@ -15,4 +15,7 @@ char *get_env_val(const char *name);
 // Set or update an environment variable (export)
 int set_env_val(const char *name, const char *value);
 
+// Unset an environment variable
+int unset_env_val(const char *name);
+
 #endif

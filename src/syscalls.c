@@ -198,6 +198,10 @@ pid_t sys_wait4(pid_t pid, int *wstatus, int options, void *rusage) {
     return syscall4(SYS_wait4, pid, (long)wstatus, options, (long)rusage);
 }
 
+int sys_getcwd(char *buf, size_t size) {
+    return syscall2(SYS_getcwd, (long)buf, (long)size);
+}
+
 // sys_chdir: Changes the current working directory of the process.
 int sys_chdir(const char *path) {
     return syscall1(SYS_chdir, (long)path);
