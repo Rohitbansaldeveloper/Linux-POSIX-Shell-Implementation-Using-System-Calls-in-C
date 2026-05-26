@@ -3,5 +3,6 @@
 
 void setup_signals(void);
 void reset_signals(void);
+int create_sigchld_fd(void);
 
 #endif

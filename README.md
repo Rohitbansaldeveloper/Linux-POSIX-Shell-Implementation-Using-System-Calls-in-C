@@ -195,21 +195,29 @@ flowchart TD
 flowchart TD
     classDef term fill:#6c5ce7,stroke:#a29bfe,stroke-width:2px,color:#fff;
     classDef dec fill:#d63031,stroke:#ff7675,stroke-width:2px,color:#fff;
+    classDef sys fill:#0984e3,stroke:#74b9ff,stroke-width:2px,color:#fff;
 
     Start["read_line_raw()"]:::term --> DisableCanon["sys_ioctl(TCGETS/TCSETS)<br/>Disable ICANON & ECHO"]:::term
-    DisableCanon --> Loop["sys_read(1 byte)"]:::term
-    Loop --> CheckChar{"What Character?"}:::dec
+    DisableCanon --> EpollSetup["sys_epoll_ctl<br/>Watch stdin (0) & signalfd"]:::sys
+    EpollSetup --> Wait["sys_epoll_wait"]:::sys
+    
+    Wait --> CheckEvent{"Event Type?"}:::dec
+    CheckEvent -->|"signalfd"| Reap["check_background_jobs()<br/>Print [Done]"]:::sys
+    Reap --> Wait
+    
+    CheckEvent -->|"stdin"| ReadKey["sys_read(1 byte)"]:::term
+    ReadKey --> CheckChar{"What Character?"}:::dec
     
     CheckChar -->|"Printable"| Echo["sys_write(byte)<br/>Add to buffer"]:::term
     CheckChar -->|"Enter"| End["Restore Terminal<br/>Return Line"]:::term
-    CheckChar -->|"Backspace"| Del["sys_write('\b \b')<br/>Remove from buffer"]:::term
+    CheckChar -->|"Backspace"| Del["sys_write('\\b \\b')<br/>Remove from buffer"]:::term
     CheckChar -->|"Tab"| AutoComp["getdents64()<br/>Scan Directory"]:::term
     CheckChar -->|"Arrow Keys"| ANSI["Parse ANSI Escape<br/>Navigate History"]:::term
     
-    Echo --> Loop
-    Del --> Loop
-    AutoComp --> Loop
-    ANSI --> Loop
+    Echo --> Wait
+    Del --> Wait
+    AutoComp --> Wait
+    ANSI --> Wait
 ```
 
 * **`src/env.h` & `src/env.c`**: 

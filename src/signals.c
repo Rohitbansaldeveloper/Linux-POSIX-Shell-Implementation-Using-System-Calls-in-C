@@ -63,4 +63,20 @@ void reset_signals(void) {
     syscall4(SYS_rt_sigaction, SIGTTOU, (long)&sa, 0, 8);
     syscall4(SYS_rt_sigaction, SIGTTIN, (long)&sa, 0, 8);
     syscall4(SYS_rt_sigaction, SIGTSTP, (long)&sa, 0, 8);
+    
+    // Unblock SIGCHLD in child process (in case we blocked it for signalfd in parent)
+    unsigned long mask = (1UL << (SIGCHLD - 1));
+    sys_rt_sigprocmask(SIG_UNBLOCK, &mask, 0, 8);
+}
+
+int create_sigchld_fd(void) {
+    // We must block SIGCHLD before creating the signalfd
+    // A sigset_t is simply a bitmask. For SIGCHLD (17), it's the 16th bit (1 << (17-1)).
+    unsigned long mask = (1UL << (SIGCHLD - 1));
+    
+    // Block SIGCHLD
+    sys_rt_sigprocmask(SIG_BLOCK, &mask, 0, 8);
+    
+    // Create signalfd
+    return sys_signalfd4(-1, &mask, 8, SFD_NONBLOCK | SFD_CLOEXEC);
 }

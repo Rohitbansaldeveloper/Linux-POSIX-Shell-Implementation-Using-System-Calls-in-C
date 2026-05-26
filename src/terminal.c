@@ -10,6 +10,8 @@
 #include "string_utils.h"
 #include "dirent.h"
 #include "env.h"
+#include "signals.h"
+#include "jobs.h"
 
 // termios constants for Linux x86_64
 #define TCGETS 0x5401
@@ -181,11 +183,33 @@ int read_line_raw(const char *prompt, char *buffer, int max_len) {
     ev.events = EPOLLIN;
     ev.data.fd = 0;
     sys_epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &ev);
-    struct epoll_event events[1];
+    
+    int sigchld_fd = create_sigchld_fd();
+    if (sigchld_fd >= 0) {
+        ev.events = EPOLLIN;
+        ev.data.fd = sigchld_fd;
+        sys_epoll_ctl(epfd, EPOLL_CTL_ADD, sigchld_fd, &ev);
+    }
+    
+    struct epoll_event events[2];
     
     while (1) {
-        int n = sys_epoll_wait(epfd, events, 1, -1);
+        int n = sys_epoll_wait(epfd, events, 2, -1);
         if (n <= 0) continue;
+        
+        int has_keystroke = 0;
+        for (int i = 0; i < n; i++) {
+            if (events[i].data.fd == sigchld_fd) {
+                struct signalfd_siginfo fdsi;
+                sys_read(sigchld_fd, &fdsi, sizeof(fdsi));
+                check_background_jobs();
+                render_line(prompt, buffer, pos);
+            } else if (events[i].data.fd == 0) {
+                has_keystroke = 1;
+            }
+        }
+        
+        if (!has_keystroke) continue;
         
         char c;
         if (sys_read(0, &c, 1) != 1) break;

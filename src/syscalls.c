@@ -226,3 +226,11 @@ int sys_getrusage(int who, struct rusage *usage) {
 int sys_clock_gettime(int clk_id, struct timespec *tp) {
     return syscall2(SYS_clock_gettime, clk_id, (long)tp);
 }
+
+int sys_rt_sigprocmask(int how, const unsigned long *set, unsigned long *oldset, size_t sigsetsize) {
+    return syscall4(SYS_rt_sigprocmask, how, (long)set, (long)oldset, sigsetsize);
+}
+
+int sys_signalfd4(int fd, const unsigned long *mask, size_t sizemask, int flags) {
+    return syscall4(SYS_signalfd4, fd, (long)mask, sizemask, flags);
+}

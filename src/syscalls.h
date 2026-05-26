@@ -13,6 +13,7 @@ typedef int pid_t;
 #define SYS_munmap 11
 #define SYS_brk 12
 #define SYS_rt_sigaction 13
+#define SYS_rt_sigprocmask 14
 #define SYS_ioctl 16
 #define SYS_pipe 22
 #define SYS_dup2 33
@@ -24,13 +25,14 @@ typedef int pid_t;
 #define SYS_kill 62
 #define SYS_getcwd 79
 #define SYS_chdir 80
-#define SYS_setpgid 109
 #define SYS_getrusage 98
+#define SYS_setpgid 109
 #define SYS_getpgrp 111
 #define SYS_getdents64 217
 #define SYS_clock_gettime 228
 #define SYS_epoll_wait 232
 #define SYS_epoll_ctl 233
+#define SYS_signalfd4 289
 #define SYS_epoll_create1 291
 
 long syscall0(long n);
@@ -144,6 +146,41 @@ int sys_clock_gettime(int clk_id, struct timespec *tp);
 /* sigaction structures and flags */
 #define WNOHANG 1
 #define WUNTRACED 2
+
+#define SIG_BLOCK          0
+#define SIG_UNBLOCK        1
+#define SIG_SETMASK        2
+
+#define SFD_NONBLOCK 00004000
+#define SFD_CLOEXEC  02000000
+
+struct signalfd_siginfo {
+    unsigned int ssi_signo;
+    int ssi_err;
+    int ssi_code;
+    unsigned int ssi_pid;
+    unsigned int ssi_uid;
+    int ssi_fd;
+    unsigned int ssi_tid;
+    unsigned int ssi_band;
+    unsigned int ssi_overrun;
+    unsigned int ssi_trapno;
+    int ssi_status;
+    int ssi_int;
+    unsigned long ssi_ptr;
+    unsigned int ssi_utime;
+    unsigned int ssi_stime;
+    unsigned int ssi_addr;
+    unsigned short ssi_addr_lsb;
+    unsigned short __pad2;
+    int ssi_syscall;
+    unsigned long ssi_call_addr;
+    unsigned int ssi_arch;
+    unsigned char __pad[28];
+};
+
+int sys_rt_sigprocmask(int how, const unsigned long *set, unsigned long *oldset, size_t sigsetsize);
+int sys_signalfd4(int fd, const unsigned long *mask, size_t sizemask, int flags);
 
 /* Macros for inspecting wait status */
 #define WTERMSIG(status)    ((status) & 0x7f)
