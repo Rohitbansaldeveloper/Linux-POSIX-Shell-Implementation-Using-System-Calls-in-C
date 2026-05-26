@@ -78,9 +78,61 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   The Lexical Analyzer.
   - **Function**: Scans the raw user input character by character and groups them into logical `Token` structures.
   - **Features**: Detects standard words, pipes (`|`), standard input/output redirections (`<`, `>`, `>>`), background flags (`&`), **stderr merging** (`2>&1`), and **Here-Documents** (`<<`). It also detects the `$` prefix to immediately perform **Variable Expansion** against the dynamic environment (e.g., transforming `$HOME` into `/home/user`).
+  
+  ```mermaid
+  flowchart TD
+      Input[Raw Input String\n'ls -l | grep txt'] --> SkipSpace{Is Space?}
+      SkipSpace -->|Yes| Skip[Advance Pointer]
+      Skip --> SkipSpace
+      SkipSpace -->|No| CheckSpecial{Is Special Char?\n'|', '<', '>', '&'}
+      
+      CheckSpecial -->|Yes| MapToken[Map to Specific Token\ne.g., TOKEN_PIPE]
+      CheckSpecial -->|No| CheckExpansion{Starts with '$'?}
+      
+      CheckExpansion -->|Yes| Expand[Lookup Env Var\nInline Replace]
+      CheckExpansion -->|No| BuildWord[Consume chars until\nspace or quote ends]
+      
+      MapToken --> AddArray[Add to Token Array]
+      Expand --> AddArray
+      BuildWord --> AddArray
+      
+      AddArray --> NextChar{End of String?}
+      NextChar -->|No| SkipSpace
+      NextChar -->|Yes| EOF[Append TOKEN_EOF]
+  ```
+
 * **`src/parser.h` & `src/parser.c`**: 
   The AST Generator.
   - **Function**: Sweeps through the tokens to construct a `Pipeline` object containing up to 16 `Command` arrays. It resolves `argc` and `argv` boundaries and maps any file redirections and Here-Doc delimiters to the specific command's input/output properties.
+
+  ```mermaid
+  flowchart TD
+      Start[Iterate Token Array] --> TokenWord{Is TOKEN_WORD?}
+      TokenWord -->|Yes| AddArg[Add to current\ncmd->argv array]
+      
+      TokenWord -->|No| TokenPipe{Is TOKEN_PIPE?}
+      TokenPipe -->|Yes| NextCmd[Null-terminate argv\nMove to next Command slot]
+      
+      TokenPipe -->|No| TokenRedirect{Is Redirect?\n'<', '>', '>>'}
+      TokenRedirect -->|Yes| SetFile[Set redirect_in or\nredirect_out to next token]
+      
+      TokenRedirect -->|No| TokenHeredoc{Is Here-Doc?\n'<<'}
+      TokenHeredoc -->|Yes| SetDelim[Set heredoc_delimiter\nto next token]
+      
+      TokenHeredoc -->|No| TokenBackground{Is '&'?}
+      TokenBackground -->|Yes| SetBg[Set pipeline->background = 1]
+      
+      AddArg --> NextToken[Next Token]
+      NextCmd --> NextToken
+      SetFile --> NextToken
+      SetDelim --> NextToken
+      SetBg --> NextToken
+      
+      NextToken --> EOFCheck{Is TOKEN_EOF?}
+      EOFCheck -->|No| TokenWord
+      EOFCheck -->|Yes| Done[Return Pipeline AST]
+  ```
+
 * **`src/executor.h` & `src/executor.c`**: 
   The heart of the shell—the Execution Engine.
   - **Function**: Iterates through the pipeline array and orchestrates the complex dance of process cloning.
@@ -88,6 +140,32 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   - **Multi-Pipe Support**: Creates an array of IPC channels via `sys_pipe`.
   - **Wiring**: For each command, it triggers `sys_fork()`. Inside the child process, it uses `sys_dup2` to meticulously stitch together standard inputs and outputs to the previously created pipes or file redirections. 
   - **Image Replacement**: Finally, it calls `sys_execve()` to obliterate the child shell process and replace it with the target binary (e.g., `/bin/ls`), passing along our custom environment.
+
+  ```mermaid
+  flowchart TD
+      Start[Execute Pipeline] --> GenPipes[sys_pipe array\nfor N-1 commands]
+      GenPipes --> Loop[For each command in AST]
+      
+      Loop --> Heredoc{Has Here-Doc?}
+      Heredoc -->|Yes| ReadHeredoc[Parent reads TTY into\nanonymous pipe]
+      Heredoc -->|No| Fork[sys_fork]
+      ReadHeredoc --> Fork
+      
+      Fork -->|Parent| SavePID[Track child PID\nsys_setpgid]
+      SavePID --> NextCmdCheck{More commands?}
+      NextCmdCheck -->|Yes| Loop
+      NextCmdCheck -->|No| WaitChild[sys_wait4 on children]
+      
+      Fork -->|Child| WirePipes[sys_dup2: Wire stdin/stdout\nto adjacent IPC pipes]
+      WirePipes --> FileRedir{Has File Redir?}
+      FileRedir -->|Yes| OpenFile[sys_open file\nsys_dup2 over stdin/stdout]
+      FileRedir -->|No| CheckStderr{merge_stderr?}
+      OpenFile --> CheckStderr
+      CheckStderr -->|Yes| DupStderr[sys_dup2 1, 2]
+      CheckStderr -->|No| Execve[sys_execve path, args, env]
+      DupStderr --> Execve
+      Execve --> End([Process Replaced])
+  ```
 
 ### 5. Process Control & Builtins
 
