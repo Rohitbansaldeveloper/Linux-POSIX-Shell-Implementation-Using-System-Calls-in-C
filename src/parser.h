@@ -12,8 +12,8 @@ typedef struct {
     char *redirect_in;
     char *redirect_out;
     int append_out;
-    int merge_stderr;       // 1 if 2>&1
-    char *heredoc_delimiter; // delimiter if <<
+    int merge_stderr;
+    char *heredoc_delimiter;
 } Command;
 
 typedef struct {
@@ -22,6 +22,35 @@ typedef struct {
     int background;
 } Pipeline;
 
-int parse(Token *tokens, Pipeline *pipeline);
+typedef enum {
+    NODE_PIPELINE,
+    NODE_AND,
+    NODE_OR,
+    NODE_IF,
+    NODE_WHILE,
+    NODE_SEQUENCE
+} ASTNodeType;
+
+typedef struct ASTNode {
+    ASTNodeType type;
+    union {
+        Pipeline pipeline;
+        struct {
+            struct ASTNode *left;
+            struct ASTNode *right;
+        } binary;
+        struct {
+            struct ASTNode *condition;
+            struct ASTNode *then_branch;
+            struct ASTNode *else_branch;
+        } if_stmt;
+        struct {
+            struct ASTNode *condition;
+            struct ASTNode *body;
+        } while_stmt;
+    } data;
+} ASTNode;
+
+ASTNode *parse(Token *tokens);
 
 #endif

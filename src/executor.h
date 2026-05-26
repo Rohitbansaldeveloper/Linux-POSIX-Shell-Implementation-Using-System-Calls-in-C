@@ -3,6 +3,8 @@
 
 #include "parser.h"
 
-void execute_pipeline(Pipeline *pipeline, char **envp);
+int execute_pipeline(Pipeline *pipeline);
+int execute_ast(ASTNode *node);
+void execute_string(const char *str, int out_fd);
 
 #endif

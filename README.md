@@ -16,8 +16,8 @@ flowchart TD
     Init --> Prompt[terminal.c: read_line_raw]
     
     Prompt --> Tokenizer[tokenizer.c: tokenize]
-    Tokenizer --> |Expands $VAR| Parser[parser.c: parse]
-    Parser --> |AST / Pipeline Array| Executor[executor.c: execute_pipeline]
+    Tokenizer --> |Expands $VAR & $(cmd)| Parser[parser.c: parse]
+    Parser --> |Recursive AST| Executor[executor.c: execute_ast]
     
     Executor --> CheckBuiltin{Is Built-in?}
     CheckBuiltin -->|Yes| Builtin[builtins.c: execute_builtin]
@@ -158,7 +158,7 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
 * **`src/tokenizer.h` & `src/tokenizer.c`**: 
   The Lexical Analyzer.
   - **Function**: Scans the raw user input character by character and groups them into logical `Token` structures.
-  - **Features**: Detects standard words, pipes (`|`), standard input/output redirections (`<`, `>`, `>>`), background flags (`&`), **stderr merging** (`2>&1`), and **Here-Documents** (`<<`). It also detects the `$` prefix to immediately perform **Variable Expansion** against the dynamic environment (e.g., transforming `$HOME` into `/home/user`).
+  - **Features**: Detects standard words, pipes (`|`), standard input/output redirections (`<`, `>`, `>>`), background flags (`&`), logical operators (`&&`, `||`), control keywords (`if`, `while`), **stderr merging** (`2>&1`), **Command Substitution** (`$(cmd)`), and **Here-Documents** (`<<`). It also detects the `$` prefix to immediately perform **Variable Expansion** against the dynamic environment.
   
   ```mermaid
   flowchart TD
@@ -183,42 +183,35 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   ```
 
 * **`src/parser.h` & `src/parser.c`**: 
-  The AST Generator.
-  - **Function**: Sweeps through the tokens to construct a `Pipeline` object containing up to 16 `Command` arrays. It resolves `argc` and `argv` boundaries and maps any file redirections and Here-Doc delimiters to the specific command's input/output properties.
+  The Recursive Descent AST Generator.
+  - **Function**: Sweeps through the tokens to construct a true Abstract Syntax Tree (AST) using a temporary bump-pointer arena (`mem_alloc_temp`). 
+  - **Features**: It recursively parses logical chains (`&&`, `||`), conditionals (`if/then/else/fi`), loops (`while/do/done`), and terminal pipelines. 
 
   ```mermaid
   flowchart TD
-      Start[Iterate Token Array] --> TokenWord{Is TOKEN_WORD?}
-      TokenWord -->|Yes| AddArg[Add to current\ncmd->argv array]
+      Start["parse(tokens)"] --> Logical["parse_logical()"]
+      Logical --> Statement["parse_statement()"]
+      Statement --> CheckType{"Token Type?"}
       
-      TokenWord -->|No| TokenPipe{Is TOKEN_PIPE?}
-      TokenPipe -->|Yes| NextCmd[Null-terminate argv\nMove to next Command slot]
+      CheckType -->|if| ParseIf["Build NODE_IF<br>Recursive: parse_logical()<br>for condition, then, else"]
+      CheckType -->|while| ParseWhile["Build NODE_WHILE<br>Recursive: parse_logical()<br>for condition, body"]
+      CheckType -->|word| Pipeline["parse_pipeline()<br>Build NODE_PIPELINE array"]
       
-      TokenPipe -->|No| TokenRedirect{Is Redirect?\n'<', '>', '>>'}
-      TokenRedirect -->|Yes| SetFile[Set redirect_in or\nredirect_out to next token]
+      ParseIf --> ReturnStmt
+      ParseWhile --> ReturnStmt
+      Pipeline --> ReturnStmt["Return ASTNode to Logical"]
       
-      TokenRedirect -->|No| TokenHeredoc{Is Here-Doc?\n'<<'}
-      TokenHeredoc -->|Yes| SetDelim[Set heredoc_delimiter\nto next token]
-      
-      TokenHeredoc -->|No| TokenBackground{Is '&'?}
-      TokenBackground -->|Yes| SetBg[Set pipeline->background = 1]
-      
-      AddArg --> NextToken[Next Token]
-      NextCmd --> NextToken
-      SetFile --> NextToken
-      SetDelim --> NextToken
-      SetBg --> NextToken
-      
-      NextToken --> EOFCheck{Is TOKEN_EOF?}
-      EOFCheck -->|No| TokenWord
-      EOFCheck -->|Yes| Done[Return Pipeline AST]
+      ReturnStmt --> CheckOp{"Followed by<br>'&&' or '||'?"}
+      CheckOp -->|Yes| BuildBinary["Build NODE_AND / NODE_OR<br>Recursive: parse_statement()"]
+      BuildBinary --> CheckOp
+      CheckOp -->|No| ReturnRoot["Return Root ASTNode"]
   ```
 
 * **`src/executor.h` & `src/executor.c`**: 
-  The heart of the shell—the Execution Engine.
-  - **Function**: Iterates through the pipeline array and orchestrates the complex dance of process cloning.
-  - **Advanced I/O**: For Here-Documents (`<<`), the shell dynamically spins up an anonymous pipe, takes over the terminal to read lines of text until the specified delimiter is reached, and securely pipes that data into the child process. It also fully supports mapping `stderr` to `stdout` (`2>&1`).
-  - **Multi-Pipe Support**: Creates an array of IPC channels via `sys_pipe`.
+  The Turing-Complete Execution Engine.
+  - **Function**: Recursively traverses the AST. Evaluates condition nodes (e.g. `if`, `while`) by extracting the `WEXITSTATUS` from `sys_wait4`, and conditionally executes `then` or `else` branches.
+  - **Advanced I/O**: For Here-Documents (`<<`), the shell dynamically spins up an anonymous pipe, takes over the terminal to read lines of text until the specified delimiter is reached, and securely pipes that data into the child process.
+  - **Multi-Pipe Support**: For leaf pipelines, creates an array of IPC channels via `sys_pipe`.
   - **Wiring**: For each command, it triggers `sys_fork()`. Inside the child process, it uses `sys_dup2` to meticulously stitch together standard inputs and outputs to the previously created pipes or file redirections. 
   - **Image Replacement**: Finally, it calls `sys_execve()` to obliterate the child shell process and replace it with the target binary (e.g., `/bin/ls`), passing along our custom environment.
 

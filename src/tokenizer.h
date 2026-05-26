@@ -15,6 +15,16 @@ typedef enum {
     TOKEN_BACKGROUND, // &
     TOKEN_REDIRECT_STDERR, // 2>&1
     TOKEN_HEREDOC, // <<
+    TOKEN_AND,      // &&
+    TOKEN_OR,       // ||
+    TOKEN_IF,       // if
+    TOKEN_THEN,     // then
+    TOKEN_ELSE,     // else
+    TOKEN_FI,       // fi
+    TOKEN_WHILE,    // while
+    TOKEN_DO,       // do
+    TOKEN_DONE,     // done
+    TOKEN_SEMI,     // ;
     TOKEN_EOF
 } TokenType;
 

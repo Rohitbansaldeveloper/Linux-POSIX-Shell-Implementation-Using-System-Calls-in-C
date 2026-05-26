@@ -140,6 +140,10 @@ pid_t sys_getpgrp(void) {
     return syscall0(SYS_getpgrp);
 }
 
+pid_t sys_getpid(void) {
+    return syscall0(SYS_getpid);
+}
+
 // sys_close: Closes an open file descriptor.
 int sys_close(int fd) {
     return syscall1(SYS_close, fd);

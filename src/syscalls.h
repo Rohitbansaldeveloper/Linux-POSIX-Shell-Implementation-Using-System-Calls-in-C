@@ -53,6 +53,7 @@ int sys_kill(pid_t pid, int sig);
 int sys_getdents64(unsigned int fd, void *dirp, unsigned int count);
 int sys_setpgid(pid_t pid, pid_t pgid);
 pid_t sys_getpgrp(void);
+pid_t sys_getpid(void);
 
 /* Signal types */
 #define SIGINT   2

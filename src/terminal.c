@@ -78,11 +78,55 @@ int get_foreground_pgrp(int fd) {
     return pgrp;
 }
 
-int read_line_raw(char *buffer, int max_len) {
+static void render_line(const char *prompt, const char *buffer, int pos) {
+    // 1. Move cursor to column 0 and clear entire line
+    sys_write(1, "\r\033[2K", 5);
+    
+    // 2. Print prompt
+    sys_write(1, prompt, str_len(prompt));
+    
+    // 3. Tokenize dynamically and print with colors
+    int in_quote = 0;
+    int is_first_word = 1;
+    
+    for (int i = 0; i < pos; i++) {
+        char c = buffer[i];
+        if (c == '"') {
+            in_quote = !in_quote;
+            if (in_quote) {
+                sys_write(1, "\033[33m\"", 6); // Yellow
+            } else {
+                sys_write(1, "\"\033[0m", 5); // Reset
+            }
+        } else if (in_quote) {
+            sys_write(1, &c, 1);
+        } else if (c == ' ') {
+            sys_write(1, &c, 1);
+            if (is_first_word && i > 0 && buffer[i-1] != ' ') {
+                is_first_word = 0;
+                sys_write(1, "\033[0m", 4);
+            }
+        } else if (c == '|' || c == '<' || c == '>' || c == '&' || c == ';') {
+            sys_write(1, "\033[36m", 5); // Cyan
+            sys_write(1, &c, 1);
+            sys_write(1, "\033[0m", 4);
+            is_first_word = 1; // Next word is a new command
+        } else {
+            if (is_first_word && (i == 0 || buffer[i-1] == ' ' || buffer[i-1] == '|' || buffer[i-1] == '&' || buffer[i-1] == ';')) {
+                sys_write(1, "\033[32m", 5); // Green for commands
+            }
+            sys_write(1, &c, 1);
+        }
+    }
+    sys_write(1, "\033[0m", 4); // Ensure reset
+}
+
+int read_line_raw(const char *prompt, char *buffer, int max_len) {
     int pos = 0;
     int history_index = history_count;
     
     enable_raw_mode();
+    render_line(prompt, buffer, pos);
     
     while (1) {
         char c;
@@ -95,7 +139,8 @@ int read_line_raw(char *buffer, int max_len) {
         } else if (c == 127 || c == '\b') { // Backspace
             if (pos > 0) {
                 pos--;
-                sys_write(1, "\b \b", 3);
+                buffer[pos] = '\0';
+                render_line(prompt, buffer, pos);
             }
         } else if (c == 27) { // Escape sequence
             char seq[2];
@@ -106,24 +151,21 @@ int read_line_raw(char *buffer, int max_len) {
                 if (seq[1] == 'A') { // Up arrow
                     if (history_index > 0) {
                         history_index--;
-                        // Clear current line visually
-                        while (pos > 0) { sys_write(1, "\b \b", 3); pos--; }
-                        // Copy history into buffer
                         str_cpy(buffer, history[history_index]);
                         pos = str_len(buffer);
-                        sys_write(1, buffer, pos); // Print it
+                        render_line(prompt, buffer, pos);
                     }
                 } else if (seq[1] == 'B') { // Down arrow
                     if (history_index < history_count - 1) {
                         history_index++;
-                        while (pos > 0) { sys_write(1, "\b \b", 3); pos--; }
                         str_cpy(buffer, history[history_index]);
                         pos = str_len(buffer);
-                        sys_write(1, buffer, pos);
+                        render_line(prompt, buffer, pos);
                     } else if (history_index == history_count - 1) {
                         history_index++;
-                        while (pos > 0) { sys_write(1, "\b \b", 3); pos--; }
                         buffer[0] = '\0'; // Back to empty prompt
+                        pos = 0;
+                        render_line(prompt, buffer, pos);
                     }
                 }
             }
@@ -156,15 +198,17 @@ int read_line_raw(char *buffer, int max_len) {
                     int match_len = str_len(match);
                     for (int i = prefix_len; i < match_len && pos < max_len - 1; i++) {
                         buffer[pos++] = match[i];
-                        sys_write(1, &match[i], 1);
                     }
+                    buffer[pos] = '\0';
+                    render_line(prompt, buffer, pos);
                 }
             }
         } else {
             // Normal character
             if (pos < max_len - 1) {
                 buffer[pos++] = c;
-                sys_write(1, &c, 1); // Echo manually
+                buffer[pos] = '\0';
+                render_line(prompt, buffer, pos);
             }
         }
     }

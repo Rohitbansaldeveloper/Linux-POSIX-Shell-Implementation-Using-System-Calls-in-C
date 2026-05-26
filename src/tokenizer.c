@@ -11,14 +11,16 @@
 #include "env.h"
 #include "memory.h"
 
+extern void execute_string(const char *str, int out_fd);
+
 // Helper to identify whitespace characters
 static int is_space(char c) {
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+    return c == ' ' || c == '\t' || c == '\r';
 }
 
 // Helper to identify special shell characters that should be their own tokens
 static int is_special(char c) {
-    return c == '|' || c == '<' || c == '>' || c == '&';
+    return c == '|' || c == '<' || c == '>' || c == '&' || c == ';' || c == '\n';
 }
 
 int tokenize(const char *input, Token *tokens, int max_tokens) {
@@ -42,10 +44,18 @@ int tokenize(const char *input, Token *tokens, int max_tokens) {
             input += 4;
             count++;
         } else if (*input == '|') {
-            tokens[count].type = TOKEN_PIPE;
-            tokens[count].value[0] = '|';
-            tokens[count].value[1] = '\0';
-            input++;
+            if (*(input + 1) == '|') {
+                tokens[count].type = TOKEN_OR;
+                tokens[count].value[0] = '|';
+                tokens[count].value[1] = '|';
+                tokens[count].value[2] = '\0';
+                input += 2;
+            } else {
+                tokens[count].type = TOKEN_PIPE;
+                tokens[count].value[0] = '|';
+                tokens[count].value[1] = '\0';
+                input++;
+            }
             count++;
         } else if (*input == '<') {
             if (*(input + 1) == '<') {
@@ -77,12 +87,65 @@ int tokenize(const char *input, Token *tokens, int max_tokens) {
             }
             count++;
         } else if (*input == '&') {
-            tokens[count].type = TOKEN_BACKGROUND;
-            tokens[count].value[0] = '&';
+            if (*(input + 1) == '&') {
+                tokens[count].type = TOKEN_AND;
+                tokens[count].value[0] = '&';
+                tokens[count].value[1] = '&';
+                tokens[count].value[2] = '\0';
+                input += 2;
+            } else {
+                tokens[count].type = TOKEN_BACKGROUND;
+                tokens[count].value[0] = '&';
+                tokens[count].value[1] = '\0';
+                input++;
+            }
+            count++;
+        } else if (*input == ';' || *input == '\n') {
+            tokens[count].type = TOKEN_SEMI;
+            tokens[count].value[0] = ';';
             tokens[count].value[1] = '\0';
             input++;
             count++;
         } else {
+            // Check for command substitution $(...)
+            if (*input == '$' && *(input+1) == '(') {
+                input += 2;
+                char sub_cmd[512];
+                int sub_i = 0;
+                while (*input && *input != ')') {
+                    sub_cmd[sub_i++] = *input++;
+                }
+                if (*input == ')') input++; // skip )
+                sub_cmd[sub_i] = '\0';
+                
+                int p[2];
+                if (sys_pipe(p) == 0) {
+                    pid_t pid = sys_fork();
+                    if (pid == 0) {
+                        sys_close(p[0]);
+                        execute_string(sub_cmd, p[1]);
+                        sys_exit(0);
+                    } else if (pid > 0) {
+                        sys_close(p[1]);
+                        char buf[1024];
+                        int n = sys_read(p[0], buf, sizeof(buf)-1);
+                        if (n > 0) {
+                            while (n > 0 && (buf[n-1] == '\n' || buf[n-1] == '\r')) n--;
+                            buf[n] = '\0';
+                            str_cpy(tokens[count].value, buf);
+                        } else {
+                            tokens[count].value[0] = '\0';
+                        }
+                        sys_close(p[0]);
+                        int status;
+                        sys_wait4(pid, &status, 0, NULL);
+                    }
+                }
+                tokens[count].type = TOKEN_WORD;
+                count++;
+                continue;
+            }
+
             // If it's not a special character, it's a regular word (command or argument)
             tokens[count].type = TOKEN_WORD;
             int i = 0;
@@ -116,6 +179,15 @@ int tokenize(const char *input, Token *tokens, int max_tokens) {
                     tokens[count].value[0] = '\0'; // Empty string if not found
                 }
             }
+            
+            // Check for control keywords
+            if (str_cmp(tokens[count].value, "if") == 0) tokens[count].type = TOKEN_IF;
+            else if (str_cmp(tokens[count].value, "then") == 0) tokens[count].type = TOKEN_THEN;
+            else if (str_cmp(tokens[count].value, "else") == 0) tokens[count].type = TOKEN_ELSE;
+            else if (str_cmp(tokens[count].value, "fi") == 0) tokens[count].type = TOKEN_FI;
+            else if (str_cmp(tokens[count].value, "while") == 0) tokens[count].type = TOKEN_WHILE;
+            else if (str_cmp(tokens[count].value, "do") == 0) tokens[count].type = TOKEN_DO;
+            else if (str_cmp(tokens[count].value, "done") == 0) tokens[count].type = TOKEN_DONE;
             
             count++;
         }

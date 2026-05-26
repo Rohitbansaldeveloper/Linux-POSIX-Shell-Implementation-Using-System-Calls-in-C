@@ -72,15 +72,13 @@ static char *find_executable(const char *cmd) {
 /*
  * Executes a pipeline of commands (e.g. "cat file.txt | grep error | wc -l > out.txt").
  */
-void execute_pipeline(Pipeline *pipeline) {
-    if (pipeline->num_commands == 0) return;
+int execute_pipeline(Pipeline *pipeline) {
+    if (pipeline->num_commands == 0) return 0;
     
     // Special case: Single builtin command (e.g., "cd /tmp").
-    // We do not fork for this, because if a child process changes its own directory,
-    // the parent shell's directory remains unchanged.
     if (pipeline->num_commands == 1 && is_builtin(pipeline->commands[0].argv[0])) {
         execute_builtin(&pipeline->commands[0]);
-        return;
+        return 0; // Return 0 for success (simplified)
     }
     
     // Arrays to track pipes and child Process IDs (PIDs)
@@ -93,7 +91,7 @@ void execute_pipeline(Pipeline *pipeline) {
     for (int i = 0; i < pipeline->num_commands - 1; i++) {
         if (sys_pipe(pipes[i]) < 0) {
             print_str(2, "pipe failed\n");
-            return;
+            return -1;
         }
     }
     
@@ -107,8 +105,7 @@ void execute_pipeline(Pipeline *pipeline) {
             if (sys_pipe(heredoc_pipe) == 0) {
                 char line[1024];
                 while (1) {
-                    print_str(1, "> ");
-                    int n = read_line_raw(line, sizeof(line));
+                    int n = read_line_raw("> ", line, sizeof(line));
                     if (n == 0) {
                         print_str(1, "\n");
                         break;
@@ -217,7 +214,7 @@ void execute_pipeline(Pipeline *pipeline) {
             // === CHILD PROCESS END ===
         } else if (pid < 0) {
             print_str(2, "fork failed\n");
-            return;
+            return -1;
         } else if (pid > 0) {
             // === PARENT PROCESS ===
             pids[i] = pid; // Track child process ID
@@ -235,6 +232,8 @@ void execute_pipeline(Pipeline *pipeline) {
         sys_close(pipes[i][1]);
     }
     
+    int final_status = 0;
+    
     // Phase 4: Wait for children or detach them (background)
     if (!pipeline->background) {
         set_foreground_pgrp(0, pgid); // Hand over terminal
@@ -242,10 +241,14 @@ void execute_pipeline(Pipeline *pipeline) {
         int status;
         for (int i = 0; i < pipeline->num_commands; i++) {
             pid_t p = sys_wait4(pids[i], &status, WUNTRACED, NULL);
+            if (i == pipeline->num_commands - 1) {
+                // Extract exit status of the last command in pipeline
+                final_status = (status >> 8) & 0xff;
+            }
             if (p > 0 && WIFSTOPPED(status)) {
-                // If it was stopped (Ctrl+Z), add it to job tracking and break
                 add_job(pgid, pipeline->commands[0].argv[0], JOB_STOPPED);
                 print_str(1, "\n[Stopped] "); print_str(1, pipeline->commands[0].argv[0]); print_str(1, "\n");
+                final_status = 146; // SIGTSTP + 128
                 break; 
             }
         }
@@ -256,5 +259,68 @@ void execute_pipeline(Pipeline *pipeline) {
         // Run in background: Add to job tracker
         int jid = add_job(pgid, pipeline->commands[0].argv[0], JOB_RUNNING);
         print_str(1, "["); print_int(1, jid); print_str(1, "] "); print_int(1, pgid); print_str(1, "\n");
+        final_status = 0;
+    }
+    
+    return final_status;
+}
+
+int execute_ast(ASTNode *node) {
+    if (!node) return 0;
+    
+    if (node->type == NODE_PIPELINE) {
+        return execute_pipeline(&node->data.pipeline);
+    } else if (node->type == NODE_SEQUENCE) {
+        execute_ast(node->data.binary.left);
+        return execute_ast(node->data.binary.right);
+    } else if (node->type == NODE_AND) {
+        int status = execute_ast(node->data.binary.left);
+        if (status == 0) {
+            return execute_ast(node->data.binary.right);
+        }
+        return status;
+    } else if (node->type == NODE_OR) {
+        int status = execute_ast(node->data.binary.left);
+        if (status != 0) {
+            return execute_ast(node->data.binary.right);
+        }
+        return status;
+    } else if (node->type == NODE_IF) {
+        int status = execute_ast(node->data.if_stmt.condition);
+        if (status == 0) {
+            if (node->data.if_stmt.then_branch) {
+                return execute_ast(node->data.if_stmt.then_branch);
+            }
+        } else {
+            if (node->data.if_stmt.else_branch) {
+                return execute_ast(node->data.if_stmt.else_branch);
+            }
+        }
+        return 0;
+    } else if (node->type == NODE_WHILE) {
+        int last_status = 0;
+        while (execute_ast(node->data.while_stmt.condition) == 0) {
+            if (node->data.while_stmt.body) {
+                last_status = execute_ast(node->data.while_stmt.body);
+            }
+        }
+        return last_status;
+    }
+    return 0;
+}
+
+void execute_string(const char *str, int out_fd) {
+    if (out_fd != -1 && out_fd != 1) {
+        sys_dup2(out_fd, 1);
+        sys_close(out_fd);
+    }
+    
+    Token tokens[256];
+    int token_count = tokenize(str, tokens, 256);
+    if (token_count > 0) {
+        ASTNode *ast = parse(tokens);
+        if (ast) {
+            execute_ast(ast);
+        }
     }
 }

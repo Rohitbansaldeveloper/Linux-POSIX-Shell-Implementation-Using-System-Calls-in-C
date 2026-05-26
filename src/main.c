@@ -47,17 +47,42 @@ void _start(void) {
     setup_signals();  // Setup signal handlers (ignore Ctrl+C in parent)
     init_jobs();      // Setup job control structures
 
-    // 3. Shell REPL (Read-Eval-Print Loop)
+    // 3. Script Execution Mode
+    if (argc > 1) {
+        int fd = sys_open(argv[1], 0, 0); // O_RDONLY
+        if (fd < 0) {
+            print_str(2, "minishell: cannot open script\n");
+            sys_exit(1);
+        }
+        
+        char *script_buf = mem_alloc_temp(65536);
+        if (script_buf) {
+            int total = 0;
+            while (total < 65535) {
+                int n = sys_read(fd, script_buf + total, 65535 - total);
+                if (n <= 0) break;
+                total += n;
+            }
+            script_buf[total] = '\0';
+            
+            Token tokens[4096];
+            int num_tokens = tokenize(script_buf, tokens, 4096);
+            if (num_tokens > 0) {
+                ASTNode *ast = parse(tokens);
+                if (ast) execute_ast(ast);
+            }
+        }
+        sys_close(fd);
+        sys_exit(0);
+    }
+
+    // 4. Shell REPL (Read-Eval-Print Loop)
     char input[MAX_INPUT];
     Token tokens[MAX_TOKENS];
-    Pipeline pipeline;
 
     while (1) {
-        // Print the shell prompt to stdout (file descriptor 1)
-        print_str(1, "$ ");
-
         // Read user input using raw terminal mode (supports history/arrows)
-        int bytes_read = read_line_raw(input, MAX_INPUT);
+        int bytes_read = read_line_raw("$ ", input, MAX_INPUT);
         if (bytes_read == 0) {
             // EOF (Ctrl+D)
             print_str(1, "\n");
@@ -75,14 +100,21 @@ void _start(void) {
             continue; // Empty input (e.g. just pressed enter)
         }
 
-        // Parsing: Convert tokens into a structured Pipeline
-        if (parse(tokens, &pipeline) < 0) {
-            print_str(2, "syntax error\n"); // Print errors to stderr (2)
+        // Parsing: Convert tokens into a structured AST
+        ASTNode *ast = parse(tokens);
+        if (!ast) {
+            if (tokens[0].type != TOKEN_EOF && tokens[0].type != TOKEN_SEMI) {
+                print_str(2, "syntax error\n");
+            }
+            mem_reset_temp();
             continue;
         }
 
         // Execution: Run the pipeline
-        execute_pipeline(&pipeline);
+        execute_ast(ast);
+        
+        // Reset the temporary memory arena to free the AST
+        mem_reset_temp();
     }
 
     // Normal termination

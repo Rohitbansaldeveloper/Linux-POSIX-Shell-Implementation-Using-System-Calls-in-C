@@ -1,96 +1,163 @@
-/*
- * parser.c
- * 
- * The parser's responsibility is to convert a linear stream of tokens
- * (produced by the tokenizer) into a structured Abstract Syntax Tree (AST),
- * which for this simple shell is represented by the 'Pipeline' structure.
- * 
- * It groups words into commands, detects pipes ('|') to separate commands,
- * and extracts file redirections ('<', '>', '>>').
- */
-
 #include "parser.h"
+#include "memory.h"
 #include "string_utils.h"
 
-int parse(Token *tokens, Pipeline *pipeline) {
-    pipeline->num_commands = 0;
-    pipeline->background = 0;
-    
-    if (tokens[0].type == TOKEN_EOF) {
-        return 0; // Empty input
+static int pos = 0;
+static Token *tks;
+
+static ASTNode *parse_statement(void);
+static ASTNode *parse_logical(void);
+static ASTNode *parse_pipeline(void);
+
+static Token *peek(void) {
+    return &tks[pos];
+}
+
+static Token *consume(void) {
+    return &tks[pos++];
+}
+
+static ASTNode *parse_pipeline(void) {
+    if (peek()->type == TOKEN_EOF || peek()->type == TOKEN_SEMI) {
+        return NULL;
     }
+
+    ASTNode *node = mem_alloc_temp(sizeof(ASTNode));
+    if (!node) return NULL;
+    node->type = NODE_PIPELINE;
+    Pipeline *p = &node->data.pipeline;
+    p->num_commands = 0;
+    p->background = 0;
     
-    // Initialize the first command in the pipeline
-    Command *current_cmd = &pipeline->commands[0];
-    current_cmd->argc = 0;
-    current_cmd->redirect_in = NULL;
-    current_cmd->redirect_out = NULL;
-    current_cmd->append_out = 0;
-    current_cmd->merge_stderr = 0;
-    current_cmd->heredoc_delimiter = NULL;
-    pipeline->num_commands = 1;
+    Command *cmd = &p->commands[0];
+    cmd->argc = 0;
+    cmd->redirect_in = NULL;
+    cmd->redirect_out = NULL;
+    cmd->append_out = 0;
+    cmd->merge_stderr = 0;
+    cmd->heredoc_delimiter = NULL;
+    p->num_commands = 1;
     
-    // Iterate over all tokens until EOF
-    for (int i = 0; tokens[i].type != TOKEN_EOF; i++) {
-        Token *t = &tokens[i];
+    while (peek()->type != TOKEN_EOF && 
+           peek()->type != TOKEN_AND && 
+           peek()->type != TOKEN_OR && 
+           peek()->type != TOKEN_THEN && 
+           peek()->type != TOKEN_ELSE && 
+           peek()->type != TOKEN_FI && 
+           peek()->type != TOKEN_DO && 
+           peek()->type != TOKEN_DONE &&
+           peek()->type != TOKEN_SEMI) {
+        
+        Token *t = consume();
         
         if (t->type == TOKEN_WORD) {
-            // A regular word is treated as a command argument
-            if (current_cmd->argc < MAX_ARGS - 1) {
-                current_cmd->argv[current_cmd->argc++] = t->value;
-            }
+            if (cmd->argc < MAX_ARGS - 1) cmd->argv[cmd->argc++] = t->value;
         } else if (t->type == TOKEN_PIPE) {
-            // A pipe indicates the end of the current command and the start of a new one.
-            if (pipeline->num_commands < MAX_COMMANDS) {
-                current_cmd->argv[current_cmd->argc] = NULL; // NULL-terminate argv array for execve
-                
-                // Move to the next command slot in the pipeline array
-                current_cmd = &pipeline->commands[pipeline->num_commands++];
-                current_cmd->argc = 0;
-                current_cmd->redirect_in = NULL;
-                current_cmd->redirect_out = NULL;
-                current_cmd->append_out = 0;
-                current_cmd->merge_stderr = 0;
-                current_cmd->heredoc_delimiter = NULL;
-            } else {
-                return -1; // Exceeded maximum allowed commands in a single pipeline
-            }
+            cmd->argv[cmd->argc] = NULL;
+            cmd = &p->commands[p->num_commands++];
+            cmd->argc = 0;
+            cmd->redirect_in = NULL;
+            cmd->redirect_out = NULL;
+            cmd->append_out = 0;
+            cmd->merge_stderr = 0;
+            cmd->heredoc_delimiter = NULL;
         } else if (t->type == TOKEN_REDIRECT_IN) {
-            // '<' indicates the next token is the input file
-            if (tokens[i+1].type == TOKEN_WORD) {
-                current_cmd->redirect_in = tokens[i+1].value;
-                i++; // Skip the filename token so we don't process it as an argument
-            } else {
-                return -1; // Syntax error: missing filename after '<'
-            }
+            if (peek()->type == TOKEN_WORD) cmd->redirect_in = consume()->value;
         } else if (t->type == TOKEN_REDIRECT_OUT || t->type == TOKEN_REDIRECT_APPEND) {
-            // '>' or '>>' indicates the next token is the output file
-            if (tokens[i+1].type == TOKEN_WORD) {
-                current_cmd->redirect_out = tokens[i+1].value;
-                current_cmd->append_out = (t->type == TOKEN_REDIRECT_APPEND);
-                i++; // Skip the filename token
-            } else {
-                return -1; // Syntax error: missing filename after '>'
+            if (peek()->type == TOKEN_WORD) {
+                cmd->redirect_out = consume()->value;
+                cmd->append_out = (t->type == TOKEN_REDIRECT_APPEND);
             }
         } else if (t->type == TOKEN_REDIRECT_STDERR) {
-            current_cmd->merge_stderr = 1;
+            cmd->merge_stderr = 1;
         } else if (t->type == TOKEN_HEREDOC) {
-            if (tokens[i+1].type == TOKEN_WORD) {
-                current_cmd->heredoc_delimiter = tokens[i+1].value;
-                i++; // Skip delimiter
-            } else {
-                return -1; // Syntax error
-            }
+            if (peek()->type == TOKEN_WORD) cmd->heredoc_delimiter = consume()->value;
         } else if (t->type == TOKEN_BACKGROUND) {
-            // '&' puts the entire pipeline into the background.
-            // In a strict POSIX grammar, this usually appears at the very end.
-            pipeline->background = 1;
+            p->background = 1;
             break;
         }
     }
+    cmd->argv[cmd->argc] = NULL;
     
-    // Ensure the argv array of the very last command is NULL-terminated.
-    // The execve system call requires a NULL pointer at the end of the arguments array.
-    current_cmd->argv[current_cmd->argc] = NULL;
-    return 1;
+    if (p->num_commands == 1 && p->commands[0].argc == 0) {
+        return NULL; // Empty pipeline
+    }
+    return node;
+}
+
+static ASTNode *parse_statement(void) {
+    if (peek()->type == TOKEN_IF) {
+        consume(); // skip 'if'
+        ASTNode *node = mem_alloc_temp(sizeof(ASTNode));
+        if (!node) return NULL;
+        node->type = NODE_IF;
+        node->data.if_stmt.condition = parse_logical();
+        
+        if (peek()->type == TOKEN_SEMI) consume();
+        if (peek()->type == TOKEN_THEN) consume();
+        
+        node->data.if_stmt.then_branch = parse_logical();
+        
+        if (peek()->type == TOKEN_SEMI) consume();
+        
+        if (peek()->type == TOKEN_ELSE) {
+            consume();
+            node->data.if_stmt.else_branch = parse_logical();
+        } else {
+            node->data.if_stmt.else_branch = NULL;
+        }
+        
+        if (peek()->type == TOKEN_SEMI) consume();
+        if (peek()->type == TOKEN_FI) consume();
+        
+        return node;
+    } else if (peek()->type == TOKEN_WHILE) {
+        consume(); // skip 'while'
+        ASTNode *node = mem_alloc_temp(sizeof(ASTNode));
+        if (!node) return NULL;
+        node->type = NODE_WHILE;
+        node->data.while_stmt.condition = parse_logical();
+        
+        if (peek()->type == TOKEN_SEMI) consume();
+        if (peek()->type == TOKEN_DO) consume();
+        
+        node->data.while_stmt.body = parse_logical();
+        
+        if (peek()->type == TOKEN_SEMI) consume();
+        if (peek()->type == TOKEN_DONE) consume();
+        
+        return node;
+    }
+    
+    return parse_pipeline();
+}
+
+static ASTNode *parse_logical(void) {
+    ASTNode *left = parse_statement();
+    if (!left) return NULL;
+    
+    while (peek()->type == TOKEN_AND || peek()->type == TOKEN_OR || peek()->type == TOKEN_SEMI) {
+        Token *op = consume();
+        ASTNode *right = parse_statement();
+        if (!right) break;
+        
+        ASTNode *new_node = mem_alloc_temp(sizeof(ASTNode));
+        if (!new_node) return left;
+        
+        if (op->type == TOKEN_AND) new_node->type = NODE_AND;
+        else if (op->type == TOKEN_OR) new_node->type = NODE_OR;
+        else new_node->type = NODE_SEQUENCE;
+        
+        new_node->data.binary.left = left;
+        new_node->data.binary.right = right;
+        left = new_node;
+    }
+    return left;
+}
+
+ASTNode *parse(Token *tokens) {
+    pos = 0;
+    tks = tokens;
+    if (peek()->type == TOKEN_EOF) return NULL;
+    return parse_logical();
 }

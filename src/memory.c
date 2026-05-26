@@ -20,6 +20,7 @@
 
 static char *heap_start = NULL;
 static size_t heap_offset = 0;
+static size_t temp_offset = HEAP_SIZE;
 
 /*
  * Initializes the heap arena.
@@ -35,6 +36,7 @@ void mem_init(void) {
         heap_start = NULL; // Initialization failed
     }
     heap_offset = 0;
+    temp_offset = HEAP_SIZE;
 }
 
 /*
@@ -61,6 +63,35 @@ void *mem_alloc(size_t size) {
     mem_set(ptr, 0, size);
     
     return ptr;
+}
+
+/*
+ * Allocate memory for temporary parsing and AST construction.
+ * This allocator grows backwards from the end of the 16MB arena.
+ * This allows the permanent allocator (mem_alloc) to grow upwards
+ * simultaneously without interference, preventing memory leaks of AST nodes.
+ */
+void *mem_alloc_temp(size_t size) {
+    if (!heap_start) return NULL;
+    
+    size = (size + 7) & ~7;
+    
+    // Check for collision with the permanent heap
+    if (heap_offset + size > temp_offset) {
+        return NULL; // Out of memory
+    }
+    
+    temp_offset -= size;
+    void *ptr = heap_start + temp_offset;
+    mem_set(ptr, 0, size);
+    return ptr;
+}
+
+/*
+ * Reset the temporary allocator. All AST nodes are instantly freed.
+ */
+void mem_reset_temp(void) {
+    temp_offset = HEAP_SIZE;
 }
 
 /*
