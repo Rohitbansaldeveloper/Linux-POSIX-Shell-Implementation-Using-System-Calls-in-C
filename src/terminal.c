@@ -8,10 +8,13 @@
 #include "terminal.h"
 #include "syscalls.h"
 #include "string_utils.h"
+#include "dirent.h"
 
 // termios constants for Linux x86_64
 #define TCGETS 0x5401
 #define TCSETS 0x5402
+#define TIOCGPGRP 0x540F
+#define TIOCSPGRP 0x5410
 #define ICANON 0000002
 #define ECHO   0000010
 
@@ -63,6 +66,16 @@ void add_history(const char *line) {
         }
         str_cpy(history[HISTORY_MAX - 1], line);
     }
+}
+
+int set_foreground_pgrp(int fd, int pgrp) {
+    return sys_ioctl(fd, TIOCSPGRP, &pgrp);
+}
+
+int get_foreground_pgrp(int fd) {
+    int pgrp;
+    sys_ioctl(fd, TIOCGPGRP, &pgrp);
+    return pgrp;
 }
 
 int read_line_raw(char *buffer, int max_len) {
@@ -120,7 +133,33 @@ int read_line_raw(char *buffer, int max_len) {
                 return 0; // Signal EOF
             }
         } else if (c == 9) { // Tab key
-            // Autocompletion stub (could match commands in PATH here)
+            // Autocompletion via raw directory reading
+            // 1. Find the start of the current word
+            int word_start = pos;
+            while (word_start > 0 && buffer[word_start - 1] != ' ') {
+                word_start--;
+            }
+            
+            // 2. Extract the prefix
+            char prefix[256];
+            int prefix_len = pos - word_start;
+            if (prefix_len > 0 && prefix_len < 255) {
+                for (int i = 0; i < prefix_len; i++) {
+                    prefix[i] = buffer[word_start + i];
+                }
+                prefix[prefix_len] = '\0';
+                
+                // 3. Search directory
+                char match[256];
+                if (autocomplete_match(prefix, match, 256)) {
+                    // Append the remainder of the match to the buffer
+                    int match_len = str_len(match);
+                    for (int i = prefix_len; i < match_len && pos < max_len - 1; i++) {
+                        buffer[pos++] = match[i];
+                        sys_write(1, &match[i], 1);
+                    }
+                }
+            }
         } else {
             // Normal character
             if (pos < max_len - 1) {

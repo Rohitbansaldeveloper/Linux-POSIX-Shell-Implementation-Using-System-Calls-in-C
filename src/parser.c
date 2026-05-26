@@ -26,6 +26,8 @@ int parse(Token *tokens, Pipeline *pipeline) {
     current_cmd->redirect_in = NULL;
     current_cmd->redirect_out = NULL;
     current_cmd->append_out = 0;
+    current_cmd->merge_stderr = 0;
+    current_cmd->heredoc_delimiter = NULL;
     pipeline->num_commands = 1;
     
     // Iterate over all tokens until EOF
@@ -48,6 +50,8 @@ int parse(Token *tokens, Pipeline *pipeline) {
                 current_cmd->redirect_in = NULL;
                 current_cmd->redirect_out = NULL;
                 current_cmd->append_out = 0;
+                current_cmd->merge_stderr = 0;
+                current_cmd->heredoc_delimiter = NULL;
             } else {
                 return -1; // Exceeded maximum allowed commands in a single pipeline
             }
@@ -67,6 +71,15 @@ int parse(Token *tokens, Pipeline *pipeline) {
                 i++; // Skip the filename token
             } else {
                 return -1; // Syntax error: missing filename after '>'
+            }
+        } else if (t->type == TOKEN_REDIRECT_STDERR) {
+            current_cmd->merge_stderr = 1;
+        } else if (t->type == TOKEN_HEREDOC) {
+            if (tokens[i+1].type == TOKEN_WORD) {
+                current_cmd->heredoc_delimiter = tokens[i+1].value;
+                i++; // Skip delimiter
+            } else {
+                return -1; // Syntax error
             }
         } else if (t->type == TOKEN_BACKGROUND) {
             // '&' puts the entire pipeline into the background.

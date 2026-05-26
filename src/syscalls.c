@@ -120,6 +120,26 @@ int sys_open(const char *filename, int flags, int mode) {
     return syscall3(SYS_open, (long)filename, flags, mode);
 }
 
+// sys_kill: Sends a signal to a process.
+int sys_kill(pid_t pid, int sig) {
+    return syscall2(SYS_kill, pid, sig);
+}
+
+// sys_getdents64: Reads raw directory entries from a file descriptor into a buffer.
+int sys_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+    return syscall3(SYS_getdents64, fd, (long)dirp, count);
+}
+
+// sys_setpgid: Set process group ID for job control.
+int sys_setpgid(pid_t pid, pid_t pgid) {
+    return syscall2(SYS_setpgid, pid, pgid);
+}
+
+// sys_getpgrp: Get current process group ID.
+pid_t sys_getpgrp(void) {
+    return syscall0(SYS_getpgrp);
+}
+
 // sys_close: Closes an open file descriptor.
 int sys_close(int fd) {
     return syscall1(SYS_close, fd);

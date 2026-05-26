@@ -42,12 +42,25 @@ void setup_signals(void) {
     // We ignore SIGQUIT (Ctrl+\).
     syscall4(SYS_rt_sigaction, SIGQUIT, (long)&sa, 0, 8);
     
-    /* 
-     * Note: When we sys_fork() a child process, the child inherits these signal
-     * dispositions. However, because we are using sys_execve() to load a new program,
-     * any signal set to SIG_IGN remains ignored, which is actually bad (a child 
-     * command like 'cat' couldn't be Ctrl+C'd). 
-     * In a fully complete POSIX shell, after forking but before execve, the child 
-     * process resets SIGINT and SIGQUIT back to SIG_DFL so they can be interrupted!
-     */
+    // Ignore job control signals in the shell parent so it doesn't get suspended
+    // when giving the terminal to child processes
+    syscall4(SYS_rt_sigaction, SIGTTOU, (long)&sa, 0, 8);
+    syscall4(SYS_rt_sigaction, SIGTTIN, (long)&sa, 0, 8);
+    syscall4(SYS_rt_sigaction, SIGTSTP, (long)&sa, 0, 8);
+}
+
+void reset_signals(void) {
+    struct k_sigaction sa;
+    
+    // Reset to default action (SIG_DFL)
+    sa.sa_handler = SIG_DFL;
+    sa.sa_flags = 0;
+    sa.sa_restorer = 0;
+    sa.sa_mask = 0;
+
+    syscall4(SYS_rt_sigaction, SIGINT, (long)&sa, 0, 8);
+    syscall4(SYS_rt_sigaction, SIGQUIT, (long)&sa, 0, 8);
+    syscall4(SYS_rt_sigaction, SIGTTOU, (long)&sa, 0, 8);
+    syscall4(SYS_rt_sigaction, SIGTTIN, (long)&sa, 0, 8);
+    syscall4(SYS_rt_sigaction, SIGTSTP, (long)&sa, 0, 8);
 }

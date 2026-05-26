@@ -13,6 +13,8 @@ typedef enum {
     TOKEN_REDIRECT_OUT, // >
     TOKEN_REDIRECT_APPEND, // >>
     TOKEN_BACKGROUND, // &
+    TOKEN_REDIRECT_STDERR, // 2>&1
+    TOKEN_HEREDOC, // <<
     TOKEN_EOF
 } TokenType;
 

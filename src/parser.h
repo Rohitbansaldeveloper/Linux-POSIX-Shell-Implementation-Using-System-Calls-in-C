@@ -12,6 +12,8 @@ typedef struct {
     char *redirect_in;
     char *redirect_out;
     int append_out;
+    int merge_stderr;       // 1 if 2>&1
+    char *heredoc_delimiter; // delimiter if <<
 } Command;
 
 typedef struct {

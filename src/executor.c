@@ -14,6 +14,8 @@
 #include "memory.h"
 #include "jobs.h"
 #include "env.h"
+#include "signals.h"
+#include "terminal.h"
 
 // Constants for open() syscall
 #define O_RDONLY 00     // Open for reading only
@@ -84,27 +86,58 @@ void execute_pipeline(Pipeline *pipeline) {
     // Arrays to track pipes and child Process IDs (PIDs)
     int pipes[MAX_COMMANDS - 1][2];
     pid_t pids[MAX_COMMANDS];
+    pid_t pgid = 0;
     
     // Phase 1: Create all necessary pipes in the parent before forking.
     // A pipe is a unidirectional data channel in the kernel.
-    // pipes[i][0] is the read end, pipes[i][1] is the write end.
     for (int i = 0; i < pipeline->num_commands - 1; i++) {
         if (sys_pipe(pipes[i]) < 0) {
-            print_str(2, "pipe creation error\n");
+            print_str(2, "pipe failed\n");
             return;
         }
     }
     
-    // Phase 2: Fork and wire up each command in the pipeline
+    // Iterate through each command in the pipeline
     for (int i = 0; i < pipeline->num_commands; i++) {
         Command *cmd = &pipeline->commands[i];
         
-        // sys_fork clones the current process. It returns 0 to the newly created
+        // Handle Here-Document (<<) in parent before forking
+        int heredoc_pipe[2] = {-1, -1};
+        if (cmd->heredoc_delimiter) {
+            if (sys_pipe(heredoc_pipe) == 0) {
+                char line[1024];
+                while (1) {
+                    print_str(1, "> ");
+                    int n = read_line_raw(line, sizeof(line));
+                    if (n == 0) {
+                        print_str(1, "\n");
+                        break;
+                    }
+                    if (str_cmp(line, cmd->heredoc_delimiter) == 0) {
+                        break;
+                    }
+                    sys_write(heredoc_pipe[1], line, str_len(line));
+                    sys_write(heredoc_pipe[1], "\n", 1);
+                }
+                sys_close(heredoc_pipe[1]); // Close write end so child gets EOF
+            }
+        }
+        
+        // sys_fork() clones the current process. It returns 0 to the newly created
         // child process, and returns the child's PID to the parent process.
         pid_t pid = sys_fork();
         
         if (pid == 0) {
             // === CHILD PROCESS START ===
+            reset_signals(); // Child processes should respond to Ctrl+C / Ctrl+Z
+            
+            pid_t my_pid = sys_getpid();
+            if (i == 0) pgid = my_pid;
+            sys_setpgid(my_pid, pgid);
+            
+            if (!pipeline->background) {
+                set_foreground_pgrp(0, pgid);
+            }
             
             // 1. Wire up pipes using dup2.
             // dup2(oldfd, newfd) forcefully closes newfd if it's open, 
@@ -130,15 +163,20 @@ void execute_pipeline(Pipeline *pipeline) {
                 sys_close(pipes[j][1]);
             }
             
-            // 3. Handle File Redirections (Overrides pipe wiring if present)
-            if (cmd->redirect_in) {
-                int fd = sys_open(cmd->redirect_in, O_RDONLY, 0);
-                if (fd < 0) {
-                    print_str(2, "open input failed\n");
+            // 3. Handle input redirection ('<') or Here-Doc ('<<')
+            if (cmd->heredoc_delimiter && heredoc_pipe[0] != -1) {
+                sys_dup2(heredoc_pipe[0], 0);
+                sys_close(heredoc_pipe[0]);
+            } else if (cmd->redirect_in) {
+                int fd_in = sys_open(cmd->redirect_in, O_RDONLY, 0);
+                if (fd_in < 0) {
+                    print_str(2, "No such file or directory: ");
+                    print_str(2, cmd->redirect_in);
+                    print_str(2, "\n");
                     sys_exit(1);
                 }
-                sys_dup2(fd, 0); // Replace stdin with file
-                sys_close(fd);
+                sys_dup2(fd_in, 0);
+                sys_close(fd_in);
             }
             
             if (cmd->redirect_out) {
@@ -153,7 +191,12 @@ void execute_pipeline(Pipeline *pipeline) {
                 sys_close(fd);
             }
             
-            // 4. Execute the command
+            // 4. Handle stderr merging ('2>&1')
+            if (cmd->merge_stderr) {
+                sys_dup2(1, 2);
+            }
+
+            // 5. Execute the command
             if (is_builtin(cmd->argv[0])) {
                 execute_builtin(cmd);
                 sys_exit(0);
@@ -175,9 +218,12 @@ void execute_pipeline(Pipeline *pipeline) {
         } else if (pid < 0) {
             print_str(2, "fork failed\n");
             return;
-        } else {
+        } else if (pid > 0) {
             // === PARENT PROCESS ===
             pids[i] = pid; // Track child process ID
+            if (i == 0) pgid = pid;
+            sys_setpgid(pid, pgid);
+            if (heredoc_pipe[0] != -1) sys_close(heredoc_pipe[0]);
         }
     }
     
@@ -191,16 +237,24 @@ void execute_pipeline(Pipeline *pipeline) {
     
     // Phase 4: Wait for children or detach them (background)
     if (!pipeline->background) {
-        // Foreground pipeline: Wait for every child in the pipeline to terminate.
-        // sys_wait4 pauses the parent process until the specified child exits or is killed.
+        set_foreground_pgrp(0, pgid); // Hand over terminal
+        
+        int status;
         for (int i = 0; i < pipeline->num_commands; i++) {
-            int status;
-            sys_wait4(pids[i], &status, 0, NULL);
+            pid_t p = sys_wait4(pids[i], &status, WUNTRACED, NULL);
+            if (p > 0 && WIFSTOPPED(status)) {
+                // If it was stopped (Ctrl+Z), add it to job tracking and break
+                add_job(pgid, pipeline->commands[0].argv[0], JOB_STOPPED);
+                print_str(1, "\n[Stopped] "); print_str(1, pipeline->commands[0].argv[0]); print_str(1, "\n");
+                break; 
+            }
         }
+        
+        // Parent shell takes back the terminal
+        set_foreground_pgrp(0, sys_getpgrp());
     } else {
-        // Background pipeline (&): Do not wait. Just print the PID of the last command.
-        print_str(1, "[Background] ");
-        print_int(1, pids[pipeline->num_commands - 1]);
-        print_str(1, "\n");
+        // Run in background: Add to job tracker
+        int jid = add_job(pgid, pipeline->commands[0].argv[0], JOB_RUNNING);
+        print_str(1, "["); print_int(1, jid); print_str(1, "] "); print_int(1, pgid); print_str(1, "\n");
     }
 }

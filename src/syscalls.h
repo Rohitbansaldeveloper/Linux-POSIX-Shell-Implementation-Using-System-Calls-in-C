@@ -23,6 +23,9 @@ typedef int pid_t;
 #define SYS_wait4 61
 #define SYS_kill 62
 #define SYS_chdir 80
+#define SYS_setpgid 109
+#define SYS_getpgrp 111
+#define SYS_getdents64 217
 
 long syscall0(long n);
 long syscall1(long n, long a1);
@@ -47,13 +50,22 @@ void sys_exit(int status);
 pid_t sys_wait4(pid_t pid, int *wstatus, int options, void *rusage);
 int sys_chdir(const char *path);
 int sys_kill(pid_t pid, int sig);
+int sys_getdents64(unsigned int fd, void *dirp, unsigned int count);
+int sys_setpgid(pid_t pid, pid_t pgid);
+pid_t sys_getpgrp(void);
 
 /* Signal types */
-#define SIGINT  2
-#define SIGQUIT 3
-#define SIGCHLD 17
+#define SIGINT   2
+#define SIGQUIT  3
+#define SIGKILL  9
+#define SIGCHLD  17
+#define SIGCONT  18
+#define SIGSTOP  19
+#define SIGTSTP  20
+#define SIGTTIN  21
+#define SIGTTOU  22
 
-/* Wait options */
+/* sigaction structures and flags */
 #define WNOHANG 1
 #define WUNTRACED 2
 
@@ -62,5 +74,6 @@ int sys_kill(pid_t pid, int sig);
 #define WIFEXITED(status)   (WTERMSIG(status) == 0)
 #define WEXITSTATUS(status) (((status) & 0xff00) >> 8)
 #define WIFSIGNALED(status) (((signed char) (((status) & 0x7f) + 1) >> 1) > 0)
+#define WIFSTOPPED(status)  (((status) & 0xff) == 0x7f)
 
 #endif

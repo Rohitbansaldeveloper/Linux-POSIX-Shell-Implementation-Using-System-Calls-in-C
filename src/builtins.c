@@ -2,6 +2,7 @@
 #include "string_utils.h"
 #include "syscalls.h"
 #include "env.h"
+#include "jobs.h"
 
 int is_builtin(const char *cmd) {
     if (!cmd) return 0;
@@ -9,6 +10,9 @@ int is_builtin(const char *cmd) {
     if (str_cmp(cmd, "exit") == 0) return 1;
     if (str_cmp(cmd, "export") == 0) return 1;
     if (str_cmp(cmd, "env") == 0) return 1;
+    if (str_cmp(cmd, "jobs") == 0) return 1;
+    if (str_cmp(cmd, "fg") == 0) return 1;
+    if (str_cmp(cmd, "bg") == 0) return 1;
     return 0;
 }
 
@@ -48,6 +52,23 @@ int execute_builtin(Command *cmd) {
             print_str(1, env_arr[i]);
             print_str(1, "\n");
         }
+        return 0;
+    } else if (str_cmp(cmd->argv[0], "jobs") == 0) {
+        print_jobs();
+        return 0;
+    } else if (str_cmp(cmd->argv[0], "fg") == 0 || str_cmp(cmd->argv[0], "bg") == 0) {
+        if (cmd->argc < 2) {
+            print_str(2, cmd->argv[0]); print_str(2, ": missing job id\n");
+            return -1;
+        }
+        // Basic atoi
+        int id = 0;
+        for (int i = 0; cmd->argv[1][i]; i++) {
+            if (cmd->argv[1][i] >= '0' && cmd->argv[1][i] <= '9') {
+                id = id * 10 + (cmd->argv[1][i] - '0');
+            }
+        }
+        continue_job(id, (cmd->argv[0][0] == 'b'));
         return 0;
     }
     return -1;

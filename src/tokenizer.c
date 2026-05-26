@@ -32,17 +32,34 @@ int tokenize(const char *input, Token *tokens, int max_tokens) {
         if (!*input) break;
         
         // 2. Identify tokens
-        if (*input == '|') {
+        if (*input == '2' && *(input+1) == '>' && *(input+2) == '&' && *(input+3) == '1') {
+            tokens[count].type = TOKEN_REDIRECT_STDERR;
+            tokens[count].value[0] = '2';
+            tokens[count].value[1] = '>';
+            tokens[count].value[2] = '&';
+            tokens[count].value[3] = '1';
+            tokens[count].value[4] = '\0';
+            input += 4;
+            count++;
+        } else if (*input == '|') {
             tokens[count].type = TOKEN_PIPE;
             tokens[count].value[0] = '|';
             tokens[count].value[1] = '\0';
             input++;
             count++;
         } else if (*input == '<') {
-            tokens[count].type = TOKEN_REDIRECT_IN;
-            tokens[count].value[0] = '<';
-            tokens[count].value[1] = '\0';
-            input++;
+            if (*(input + 1) == '<') {
+                tokens[count].type = TOKEN_HEREDOC;
+                tokens[count].value[0] = '<';
+                tokens[count].value[1] = '<';
+                tokens[count].value[2] = '\0';
+                input += 2;
+            } else {
+                tokens[count].type = TOKEN_REDIRECT_IN;
+                tokens[count].value[0] = '<';
+                tokens[count].value[1] = '\0';
+                input++;
+            }
             count++;
         } else if (*input == '>') {
             // Check for double chevron '>>' (append mode)
