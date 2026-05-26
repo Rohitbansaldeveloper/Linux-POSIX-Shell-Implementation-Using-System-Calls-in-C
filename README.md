@@ -14,6 +14,39 @@ This is a true systems programming project. It bypasses high-level wrappers like
 * **Custom Aliases**: Supports `alias name=value` and `unalias name`. The tokenizer recursively expands aliases inline during lexical analysis before the AST is built!
 * **Generalized FD Redirection (`N>&M`)**: Lexes and parses complex file descriptor duplications, utilizing an array of custom `sys_dup2` routings in the execution engine.
 
+```mermaid
+flowchart TD
+    classDef feat fill:#00b894,stroke:#55efc4,stroke-width:2px,color:#fff;
+    classDef process fill:#0984e3,stroke:#74b9ff,stroke-width:2px,color:#fff;
+    classDef io fill:#fdcb6e,stroke:#ffeaa7,stroke-width:2px,color:#2d3436;
+
+    Input["User Types Input"]:::io --> Term["terminal.c"]:::process
+    
+    Term --> CheckCtrlR{"Is Ctrl+R?"}:::feat
+    CheckCtrlR -->|"Yes"| History["Read ~/.minishell_history<br/>Reverse Search"]:::feat
+    CheckCtrlR -->|"No"| CheckTab{"Is TAB?"}:::feat
+    
+    CheckTab -->|"Yes"| PathComp["Split $PATH & Scan<br/>using sys_getdents64"]:::feat
+    CheckTab -->|"No"| Enter{"Is Enter?"}:::process
+    
+    Enter -->|"Yes"| Tokenize["tokenizer.c"]:::process
+    
+    Tokenize --> Alias{"Check Alias Map"}:::feat
+    Alias -->|"Match Found"| ExpandAlias["Inline Lexical Replacement"]:::feat
+    Alias -->|"No Match"| Parse["parser.c"]:::process
+    ExpandAlias --> Parse
+    
+    Parse --> ParseRedir["Parse N>&M Redirection<br/>into AST Node"]:::feat
+    ParseRedir --> Exec["executor.c"]:::process
+    
+    Exec --> Glob{"Contains * or ?"}:::feat
+    Glob -->|"Yes"| ExpandGlob["sys_getdents64<br/>Dynamic Arg Expansion"]:::feat
+    Glob -->|"No"| Run["sys_fork & sys_execve"]:::process
+    ExpandGlob --> Run
+    
+    Run --> Dup2["Custom sys_dup2 Loop<br/>for N>&M Redirections"]:::feat
+```
+
 ---
 
 ## 🏗️ Architecture & Flow Diagram
@@ -108,8 +141,15 @@ flowchart TD
 flowchart TD
     classDef step fill:#00b894,stroke:#55efc4,stroke-width:2px,color:#fff;
     classDef check fill:#e17055,stroke:#fab1a0,stroke-width:2px,color:#fff;
+    classDef env fill:#fdcb6e,stroke:#ffeaa7,stroke-width:2px,color:#2d3436;
 
-    Start["User presses TAB"]:::step --> OpenDir["sys_open('.', O_RDONLY)"]:::step
+    Start["User presses TAB"]:::step --> CheckCmd{"Is First Word<br/>(Command)?"}:::check
+    CheckCmd -->|"Yes"| SplitPath["Split $PATH string<br/>by ':'"]:::env
+    SplitPath --> OpenDir["sys_open(dir_path, O_RDONLY)"]:::step
+    
+    CheckCmd -->|"No"| OpenLocal["sys_open('.', O_RDONLY)"]:::step
+    OpenLocal --> GetDents
+    
     OpenDir --> GetDents["sys_getdents64(fd, buffer)"]:::step
     GetDents --> ReadBuffer["Parse linux_dirent64 structs<br/>from raw byte buffer"]:::step
     ReadBuffer --> CheckPrefix{"Matches input<br/>prefix?"}:::check
@@ -118,7 +158,10 @@ flowchart TD
     SaveMatch --> NextEntry
     NextEntry --> EOFCheck{"More bytes in buffer?"}:::check
     EOFCheck -->|"Yes"| ReadBuffer
-    EOFCheck -->|"No"| Complete["Return matching string"]:::step
+    EOFCheck -->|"No"| PathCheck{"More PATH dirs?"}:::check
+    
+    PathCheck -->|"Yes"| OpenDir
+    PathCheck -->|"No"| Complete["Return matching string"]:::step
 ```
 
 * **`src/string_utils.h` & `src/string_utils.c`**: 
