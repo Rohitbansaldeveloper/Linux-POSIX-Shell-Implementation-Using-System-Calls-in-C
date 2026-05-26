@@ -206,3 +206,23 @@ int sys_getcwd(char *buf, size_t size) {
 int sys_chdir(const char *path) {
     return syscall1(SYS_chdir, (long)path);
 }
+
+int sys_epoll_create1(int flags) {
+    return syscall1(SYS_epoll_create1, flags);
+}
+
+int sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *event) {
+    return syscall4(SYS_epoll_ctl, epfd, op, fd, (long)event);
+}
+
+int sys_epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout) {
+    return syscall4(SYS_epoll_wait, epfd, (long)events, maxevents, timeout);
+}
+
+int sys_getrusage(int who, struct rusage *usage) {
+    return syscall2(SYS_getrusage, who, (long)usage);
+}
+
+int sys_clock_gettime(int clk_id, struct timespec *tp) {
+    return syscall2(SYS_clock_gettime, clk_id, (long)tp);
+}

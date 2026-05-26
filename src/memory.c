@@ -17,67 +17,82 @@
 
 // We allocate a single, large 16 MB chunk of memory upfront (an arena).
 #define HEAP_SIZE (1024 * 1024 * 16)
+#define PERMANENT_SIZE (1024 * 1024 * 8) // First 8MB for malloc
+
+typedef struct MemBlock {
+    size_t size;
+    int is_free;
+    struct MemBlock *next;
+} MemBlock;
 
 static char *heap_start = NULL;
-static size_t heap_offset = 0;
+static MemBlock *head = NULL;
 static size_t temp_offset = HEAP_SIZE;
 
 /*
  * Initializes the heap arena.
  */
 void mem_init(void) {
-    // SYS_mmap requests memory from the kernel.
-    // MAP_ANONYMOUS means it's not backed by a file (it's just RAM).
-    // MAP_PRIVATE means updates are not visible to other processes.
-    // We request PROT_READ | PROT_WRITE so we can read and write to this memory.
     heap_start = sys_mmap(NULL, HEAP_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     
-    if (heap_start == MAP_FAILED) {
-        heap_start = NULL; // Initialization failed
+    if (heap_start != MAP_FAILED) {
+        head = (MemBlock *)heap_start;
+        head->size = PERMANENT_SIZE - sizeof(MemBlock);
+        head->is_free = 1;
+        head->next = NULL;
+        
+        temp_offset = HEAP_SIZE;
+    } else {
+        heap_start = NULL;
     }
-    heap_offset = 0;
-    temp_offset = HEAP_SIZE;
 }
 
 /*
- * A very simple "bump pointer" allocator.
- * It just moves a pointer forward in our large arena.
- * This is very fast but has a massive drawback: it never reclaims memory.
+ * A block-based memory allocator replacing malloc.
+ * It searches for a free block, splits it if necessary, and returns the pointer.
  */
 void *mem_alloc(size_t size) {
-    if (!heap_start) return NULL;
+    if (!head || size == 0) return NULL;
     
-    // Align the requested size to an 8-byte boundary.
-    // This is required for many architectures to safely store pointers or doubles.
+    // Align size to 8 bytes
     size = (size + 7) & ~7;
     
-    if (heap_offset + size > HEAP_SIZE) {
-        return NULL; // Out of memory in our arena
+    MemBlock *curr = head;
+    while (curr) {
+        if (curr->is_free && curr->size >= size) {
+            // Split the block if there is enough excess space
+            if (curr->size >= size + sizeof(MemBlock) + 8) {
+                MemBlock *new_block = (MemBlock *)((char *)curr + sizeof(MemBlock) + size);
+                new_block->size = curr->size - size - sizeof(MemBlock);
+                new_block->is_free = 1;
+                new_block->next = curr->next;
+                
+                curr->size = size;
+                curr->is_free = 0;
+                curr->next = new_block;
+            } else {
+                curr->is_free = 0;
+            }
+            void *ptr = (void *)(curr + 1);
+            mem_set(ptr, 0, curr->size);
+            return ptr;
+        }
+        curr = curr->next;
     }
-    
-    // Allocate the block by bumping the offset
-    void *ptr = heap_start + heap_offset;
-    heap_offset += size;
-    
-    // Zero-initialize the memory (similar to calloc) for safety
-    mem_set(ptr, 0, size);
-    
-    return ptr;
+    return NULL; // Out of memory
 }
 
 /*
  * Allocate memory for temporary parsing and AST construction.
- * This allocator grows backwards from the end of the 16MB arena.
- * This allows the permanent allocator (mem_alloc) to grow upwards
- * simultaneously without interference, preventing memory leaks of AST nodes.
+ * Grows backwards from the top of the arena (fast bump allocator).
  */
 void *mem_alloc_temp(size_t size) {
     if (!heap_start) return NULL;
     
     size = (size + 7) & ~7;
     
-    // Check for collision with the permanent heap
-    if (heap_offset + size > temp_offset) {
+    // Ensure it doesn't crash into permanent memory limit (8MB)
+    if (temp_offset - size < PERMANENT_SIZE) {
         return NULL; // Out of memory
     }
     
@@ -87,20 +102,27 @@ void *mem_alloc_temp(size_t size) {
     return ptr;
 }
 
-/*
- * Reset the temporary allocator. All AST nodes are instantly freed.
- */
 void mem_reset_temp(void) {
     temp_offset = HEAP_SIZE;
 }
 
 /*
- * Freeing memory in a bump allocator is a no-op unless you reset the entire arena.
- * For a simple shell, this might cause memory leaks over time, but is sufficient 
- * for a basic implementation. A more robust shell would track block sizes or
- * reset the arena entirely after each command finishes executing.
+ * Reclaims memory by marking block as free and coalescing adjacent free blocks.
  */
 void mem_free(void *ptr) {
-    // Intentionally left blank.
-    (void)ptr; 
+    if (!ptr) return;
+    
+    MemBlock *block = (MemBlock *)ptr - 1;
+    block->is_free = 1;
+    
+    // Coalesce adjacent free blocks
+    MemBlock *curr = head;
+    while (curr) {
+        if (curr->is_free && curr->next && curr->next->is_free) {
+            curr->size += sizeof(MemBlock) + curr->next->size;
+            curr->next = curr->next->next;
+        } else {
+            curr = curr->next;
+        }
+    }
 }

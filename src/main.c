@@ -21,6 +21,7 @@
 #include "signals.h"
 #include "terminal.h"
 #include "env.h"
+#include "logger.h"
 
 #define MAX_INPUT 1024
 
@@ -46,6 +47,7 @@ void _start(void) {
     init_env(envp);   // Initialize dynamic environment variables
     setup_signals();  // Setup signal handlers (ignore Ctrl+C in parent)
     init_jobs();      // Setup job control structures
+    logger_init();    // Initialize logger
     load_history();   // Load command history from disk
 
     // 3. Script Execution Mode
@@ -74,6 +76,7 @@ void _start(void) {
             }
         }
         sys_close(fd);
+        logger_shutdown();
         sys_exit(0);
     }
 

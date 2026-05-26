@@ -25,8 +25,13 @@ typedef int pid_t;
 #define SYS_getcwd 79
 #define SYS_chdir 80
 #define SYS_setpgid 109
+#define SYS_getrusage 98
 #define SYS_getpgrp 111
 #define SYS_getdents64 217
+#define SYS_clock_gettime 228
+#define SYS_epoll_wait 232
+#define SYS_epoll_ctl 233
+#define SYS_epoll_create1 291
 
 long syscall0(long n);
 long syscall1(long n, long a1);
@@ -56,6 +61,65 @@ int sys_getdents64(unsigned int fd, void *dirp, unsigned int count);
 int sys_setpgid(pid_t pid, pid_t pgid);
 pid_t sys_getpgrp(void);
 pid_t sys_getpid(void);
+
+// Advanced Async and Perf syscalls
+typedef union epoll_data {
+    void *ptr;
+    int fd;
+    unsigned int u32;
+    unsigned long long u64;
+} epoll_data_t;
+
+struct epoll_event {
+    unsigned int events;
+    epoll_data_t data;
+} __attribute__((__packed__));
+
+#define EPOLLIN 0x001
+#define EPOLL_CTL_ADD 1
+#define EPOLL_CTL_DEL 2
+#define EPOLL_CTL_MOD 3
+
+int sys_epoll_create1(int flags);
+int sys_epoll_ctl(int epfd, int op, int fd, struct epoll_event *event);
+int sys_epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout);
+
+struct timeval {
+    long tv_sec;
+    long tv_usec;
+};
+
+struct timespec {
+    long tv_sec;
+    long tv_nsec;
+};
+
+struct rusage {
+    struct timeval ru_utime;
+    struct timeval ru_stime;
+    long ru_maxrss;
+    long ru_ixrss;
+    long ru_idrss;
+    long ru_isrss;
+    long ru_minflt;
+    long ru_majflt;
+    long ru_nswap;
+    long ru_inblock;
+    long ru_oublock;
+    long ru_msgsnd;
+    long ru_msgrcv;
+    long ru_nsignals;
+    long ru_nvcsw;
+    long ru_nivcsw;
+};
+
+#define RUSAGE_SELF 0
+#define RUSAGE_CHILDREN -1
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
+
+int sys_getrusage(int who, struct rusage *usage);
+int sys_clock_gettime(int clk_id, struct timespec *tp);
 
 /* File Open Flags */
 #define O_RDONLY 0

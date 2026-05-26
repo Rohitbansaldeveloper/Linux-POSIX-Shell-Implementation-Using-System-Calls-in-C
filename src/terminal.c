@@ -176,7 +176,17 @@ int read_line_raw(const char *prompt, char *buffer, int max_len) {
     enable_raw_mode();
     render_line(prompt, buffer, pos);
     
+    int epfd = sys_epoll_create1(0);
+    struct epoll_event ev;
+    ev.events = EPOLLIN;
+    ev.data.fd = 0;
+    sys_epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &ev);
+    struct epoll_event events[1];
+    
     while (1) {
+        int n = sys_epoll_wait(epfd, events, 1, -1);
+        if (n <= 0) continue;
+        
         char c;
         if (sys_read(0, &c, 1) != 1) break;
         
@@ -362,6 +372,7 @@ int read_line_raw(const char *prompt, char *buffer, int max_len) {
         }
     }
     
+    sys_close(epfd);
     disable_raw_mode();
     if (pos > 0) {
         add_history(buffer);
