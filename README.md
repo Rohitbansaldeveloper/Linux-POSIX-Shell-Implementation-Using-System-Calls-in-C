@@ -55,6 +55,18 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
 * **`src/memory.h` & `src/memory.c`**: 
   A custom memory allocator replacing `malloc`/`free`.
   - **Function**: Uses `sys_mmap` with `MAP_ANONYMOUS` to request a raw 16MB page of memory directly from the OS. It implements a rapid "bump pointer" allocator (`mem_alloc`) to dole out dynamic memory chunks to the shell.
+  
+  ```mermaid
+  flowchart TD
+      Start["Request Memory (mem_alloc)"] --> Check{"Has Enough Free Space?"}
+      Check -->|No| Syscall["sys_mmap(MAP_ANONYMOUS)"]
+      Syscall --> Map["Kernel maps new page<br>(4096 bytes)"]
+      Map --> SetPointers["Update heap_start & heap_end"]
+      SetPointers --> Allocate["Bump Pointer:<br>current_ptr += size"]
+      Check -->|Yes| Allocate
+      Allocate --> Return["Return Address"]
+  ```
+
 * **`src/dirent.h` & `src/dirent.c`**:
   Raw Directory Parsing.
   - **Function**: Uses the `sys_getdents64` system call to bypass `libc`'s `opendir` and read the raw binary filesystem structures (`linux_dirent64`) directly from the kernel into a memory buffer. This allows the shell to match prefixes for TAB autocompletion.
@@ -68,6 +80,25 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   A low-level terminal (TTY) driver.
   - **Function**: Replaces the standard `read()` loop. It uses the `sys_ioctl` system call to strip the terminal of its default canonical mode (line-buffering), forcing it into **Raw Mode**.
   - **Features**: This allows the shell to intercept individual keystrokes. It parses multi-byte ANSI escape sequences (e.g., `\e[A`) for Up/Down Arrow keys (Command History), and it hooks the `TAB` key into `src/dirent.c` to provide live inline autocompletion for files in the current directory!
+
+  ```mermaid
+  flowchart TD
+      Start["read_line_raw()"] --> DisableCanon["sys_ioctl(TCGETS/TCSETS)<br>Disable ICANON & ECHO"]
+      DisableCanon --> Loop["sys_read(1 byte)"]
+      Loop --> CheckChar{"What Character?"}
+      
+      CheckChar -->|Printable| Echo["sys_write(byte)<br>Add to buffer"]
+      CheckChar -->|Enter| End["Restore Terminal<br>Return Line"]
+      CheckChar -->|Backspace| Del["sys_write('\b \b')<br>Remove from buffer"]
+      CheckChar -->|Tab| AutoComp["getdents64()<br>Scan Directory"]
+      CheckChar -->|Arrow Keys| ANSI["Parse ANSI Escape<br>Navigate History"]
+      
+      Echo --> Loop
+      Del --> Loop
+      AutoComp --> Loop
+      ANSI --> Loop
+  ```
+
 * **`src/env.h` & `src/env.c`**: 
   A dynamic environment variable manager.
   - **Function**: Captures the initial environment block from the kernel stack and copies it into our custom memory allocator. It exposes `get_env_val` and `set_env_val` so variables can be modified and expanded safely, eventually passing the customized array down to child processes.
@@ -81,24 +112,24 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   
   ```mermaid
   flowchart TD
-      Input[Raw Input String\n'ls -l | grep txt'] --> SkipSpace{Is Space?}
-      SkipSpace -->|Yes| Skip[Advance Pointer]
+      Input["Raw Input String<br>'ls -l | grep txt'"] --> SkipSpace{"Is Space?"}
+      SkipSpace -->|Yes| Skip["Advance Pointer"]
       Skip --> SkipSpace
-      SkipSpace -->|No| CheckSpecial{Is Special Char?\n'|', '<', '>', '&'}
+      SkipSpace -->|No| CheckSpecial{"Is Special Char?<br>'|', '<', '>', '&'"}
       
-      CheckSpecial -->|Yes| MapToken[Map to Specific Token\ne.g., TOKEN_PIPE]
-      CheckSpecial -->|No| CheckExpansion{Starts with '$'?}
+      CheckSpecial -->|Yes| MapToken["Map to Specific Token<br>e.g., TOKEN_PIPE"]
+      CheckSpecial -->|No| CheckExpansion{"Starts with '$'?"}
       
-      CheckExpansion -->|Yes| Expand[Lookup Env Var\nInline Replace]
-      CheckExpansion -->|No| BuildWord[Consume chars until\nspace or quote ends]
+      CheckExpansion -->|Yes| Expand["Lookup Env Var<br>Inline Replace"]
+      CheckExpansion -->|No| BuildWord["Consume chars until<br>space or quote ends"]
       
-      MapToken --> AddArray[Add to Token Array]
+      MapToken --> AddArray["Add to Token Array"]
       Expand --> AddArray
       BuildWord --> AddArray
       
-      AddArray --> NextChar{End of String?}
+      AddArray --> NextChar{"End of String?"}
       NextChar -->|No| SkipSpace
-      NextChar -->|Yes| EOF[Append TOKEN_EOF]
+      NextChar -->|Yes| EOF["Append TOKEN_EOF"]
   ```
 
 * **`src/parser.h` & `src/parser.c`**: 
@@ -179,6 +210,25 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   True Job Control & Process Groups.
   - **Function**: Manages the complex state of foreground and background jobs. It assigns processes to distinct Process Groups (`sys_setpgid`) and explicitly hands over terminal control (`sys_ioctl` with `TIOCSPGRP`) to foreground jobs.
   - **Features**: This allows you to press `Ctrl+Z` to suspend a running process (`SIGTSTP`), track it in the background using the `jobs` command, and resume it in the foreground using `fg 1` (sending `SIGCONT`). Background "zombie" processes are cleanly reaped using a non-blocking `sys_wait4` call (`WNOHANG | WUNTRACED`).
+
+  ```mermaid
+  flowchart TD
+      Start["Parent Shell"] --> SetupSignals["sys_rt_sigaction<br>Ignore SIGINT, SIGTTOU"]
+      SetupSignals --> Prompt["Wait for Command"]
+      Prompt --> Exec{"Foreground or Background?"}
+      
+      Exec -->|Foreground| Handover["sys_ioctl(TIOCSPGRP)<br>Give Terminal to Child"]
+      Handover --> Wait4["sys_wait4(WUNTRACED)"]
+      Wait4 --> CheckStatus{"WIFSTOPPED?"}
+      CheckStatus -->|Yes| SaveJob["Save as JOB_STOPPED<br>Print [Stopped]"]
+      CheckStatus -->|No| Done["Process Finished"]
+      SaveJob --> TakeBack["sys_ioctl(TIOCSPGRP)<br>Reclaim Terminal"]
+      Done --> TakeBack
+      TakeBack --> Prompt
+      
+      Exec -->|Background| BgSave["Save as JOB_RUNNING"]
+      BgSave --> Prompt
+  ```
 
 ---
 
