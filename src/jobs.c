@@ -123,7 +123,6 @@ void check_background_jobs(void) {
         // Find which job this pid belongs to
         // Note: In pipelines, the pgid is the pid of the first process.
         // For simplicity, we assume we just check the pgid of the exiting process.
-        pid_t pgid = sys_getpgrp(); // Wait, no, we need the child's pgid.
         // Actually, without a full process map, we'll just try to find a job with pgid == pid
         Job *j = get_job(pid); 
         if (j) {

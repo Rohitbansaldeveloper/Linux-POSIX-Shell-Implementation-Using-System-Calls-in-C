@@ -94,6 +94,22 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   Contains the `_start` symbol, which the kernel directly jumps to when executing the binary.
   - **Function**: Manually parses the raw CPU stack pointer (`%rsp`) to extract `argc`, `argv`, and the initial `envp` (environment pointer). It calls all initialization routines and then loops indefinitely to power the shell's REPL.
 
+```mermaid
+flowchart TD
+    classDef build fill:#0984e3,stroke:#74b9ff,stroke-width:2px,color:#fff;
+    classDef code fill:#6c5ce7,stroke:#a29bfe,stroke-width:2px,color:#fff;
+    classDef kernel fill:#e17055,stroke:#fab1a0,stroke-width:2px,color:#fff;
+
+    GCC["Makefile<br/>gcc -nostdlib -static"]:::build --> Binary["minishell Binary<br/>(No glibc, no crt0)"]:::build
+    Binary --> Exec["Kernel loads ELF"]:::kernel
+    Exec --> Jump["Kernel jumps to _start"]:::kernel
+    Jump --> MainStart["src/main.c: _start()"]:::code
+    MainStart --> RSP["Parse %rsp (Stack)"]:::code
+    RSP --> ExtractArgs["Extract argc, argv, envp"]:::code
+    ExtractArgs --> InitSys["init_memory(), init_env()"]:::code
+    InitSys --> Repl["Enter REPL loop"]:::code
+```
+
 ### 2. Linux Kernel Interface (The Primitives)
 
 * **`src/syscalls.h` & `src/syscalls.c`**: 

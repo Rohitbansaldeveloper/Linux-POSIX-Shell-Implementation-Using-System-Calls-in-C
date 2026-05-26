@@ -327,7 +327,47 @@ int execute_ast(ASTNode *node) {
     if (!node) return 0;
     
     if (node->type == NODE_PIPELINE) {
-        return execute_pipeline(&node->data.pipeline);
+        int is_time = 0;
+        if (node->data.pipeline.num_commands > 0 && 
+            node->data.pipeline.commands[0].argc > 0 &&
+            str_cmp(node->data.pipeline.commands[0].argv[0], "time") == 0) {
+            
+            is_time = 1;
+            Command *c = &node->data.pipeline.commands[0];
+            for (int j = 0; j < c->argc - 1; j++) {
+                c->argv[j] = c->argv[j+1];
+            }
+            c->argv[c->argc - 1] = NULL;
+            c->argc--;
+            if (c->argc == 0) return 0;
+        }
+
+        struct timespec start, end;
+        if (is_time) sys_clock_gettime(CLOCK_MONOTONIC, &start);
+
+        int status = execute_pipeline(&node->data.pipeline);
+
+        if (is_time) {
+            sys_clock_gettime(CLOCK_MONOTONIC, &end);
+            struct rusage usage;
+            sys_getrusage(RUSAGE_CHILDREN, &usage);
+            
+            print_str(2, "\nreal\t");
+            long sec = end.tv_sec - start.tv_sec;
+            long nsec = end.tv_nsec - start.tv_nsec;
+            if (nsec < 0) { sec--; nsec += 1000000000; }
+            print_int(2, sec); print_str(2, "."); print_int(2, nsec / 1000000); print_str(2, "s\n");
+            
+            print_str(2, "user\t");
+            print_int(2, usage.ru_utime.tv_sec); print_str(2, "."); print_int(2, usage.ru_utime.tv_usec / 1000); print_str(2, "s\n");
+            
+            print_str(2, "sys \t");
+            print_int(2, usage.ru_stime.tv_sec); print_str(2, "."); print_int(2, usage.ru_stime.tv_usec / 1000); print_str(2, "s\n");
+            
+            print_str(2, "rss \t");
+            print_int(2, usage.ru_maxrss); print_str(2, " KB\n");
+        }
+        return status;
     } else if (node->type == NODE_SEQUENCE) {
         execute_ast(node->data.binary.left);
         return execute_ast(node->data.binary.right);
