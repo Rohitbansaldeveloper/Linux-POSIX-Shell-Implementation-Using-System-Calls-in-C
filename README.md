@@ -52,6 +52,17 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
   The core of the "zero libc" implementation.
   - **Function**: Uses `x86_64` inline assembly to trigger software interrupts via the `syscall` instruction. It maps C function arguments into the specific CPU registers the Linux kernel demands (`%rdi`, `%rsi`, `%rdx`, `%r10`, etc.).
   - **Provides**: Wrappers for `sys_read`, `sys_write`, `sys_open`, `sys_pipe`, `sys_dup2`, `sys_fork`, `sys_execve`, `sys_wait4`, `sys_mmap`, `sys_ioctl`, and `sys_rt_sigaction`.
+
+  ```mermaid
+  flowchart TD
+      UserCode["Shell C Code<br>(e.g. sys_write)"] --> SyscallFunc["syscall3(number, arg1, arg2, arg3)"]
+      SyscallFunc --> Assembly["Inline Assembly<br>'syscall' instruction"]
+      Assembly --> RegisterMap["Map args to Registers<br>%rdi, %rsi, %rdx, %r10, %r8, %r9"]
+      RegisterMap --> KernelTrap["Ring 0 Transition<br>(Kernel Space)"]
+      KernelTrap --> KernelExecute["Linux Kernel executes<br>system call"]
+      KernelExecute --> ReturnRegister["Result returned in %rax"]
+      ReturnRegister --> UserCode
+  ```
 * **`src/memory.h` & `src/memory.c`**: 
   A custom memory allocator replacing `malloc`/`free`.
   - **Function**: Uses `sys_mmap` with `MAP_ANONYMOUS` to request a raw 16MB page of memory directly from the OS. It implements a rapid "bump pointer" allocator (`mem_alloc`) to dole out dynamic memory chunks to the shell.
@@ -70,9 +81,34 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
 * **`src/dirent.h` & `src/dirent.c`**:
   Raw Directory Parsing.
   - **Function**: Uses the `sys_getdents64` system call to bypass `libc`'s `opendir` and read the raw binary filesystem structures (`linux_dirent64`) directly from the kernel into a memory buffer. This allows the shell to match prefixes for TAB autocompletion.
+
+  ```mermaid
+  flowchart TD
+      Start["User presses TAB"] --> OpenDir["sys_open('.', O_RDONLY)"]
+      OpenDir --> GetDents["sys_getdents64(fd, buffer)"]
+      GetDents --> ReadBuffer["Parse linux_dirent64 structs<br>from raw byte buffer"]
+      ReadBuffer --> CheckPrefix{"Matches input<br>prefix?"}
+      CheckPrefix -->|Yes| SaveMatch["Save as auto-completion<br>candidate"]
+      CheckPrefix -->|No| NextEntry["Move pointer by<br>d_reclen bytes"]
+      SaveMatch --> NextEntry
+      NextEntry --> EOFCheck{"More bytes in buffer?"}
+      EOFCheck -->|Yes| ReadBuffer
+      EOFCheck -->|No| Complete["Return matching string"]
+  ```
+
 * **`src/string_utils.h` & `src/string_utils.c`**: 
   Replaces `<string.h>`.
   - **Function**: Implements lightweight equivalents of `strlen`, `strcmp`, `strncmp`, `memcpy`, and `memset` necessary for text processing. Also includes a custom integer-to-string formatting routine since `printf` is unavailable.
+
+  ```mermaid
+  flowchart TD
+      StringReq["String Operation<br>(e.g., str_cpy, str_cmp)"] --> LoopChars["Loop through memory<br>byte by byte"]
+      LoopChars --> Compare{"Check char<br>against '\0'"}
+      Compare -->|Not NULL| Process["Copy/Compare/Count byte"]
+      Process --> Advance["Pointer++"]
+      Advance --> LoopChars
+      Compare -->|NULL| Return["Return Length/Diff/Pointer"]
+  ```
 
 ### 3. Advanced Terminal & Environment Management
 
@@ -102,6 +138,20 @@ Because we lack `libc`, this project is highly modular, reimplementing many fund
 * **`src/env.h` & `src/env.c`**: 
   A dynamic environment variable manager.
   - **Function**: Captures the initial environment block from the kernel stack and copies it into our custom memory allocator. It exposes `get_env_val` and `set_env_val` so variables can be modified and expanded safely, eventually passing the customized array down to child processes.
+
+  ```mermaid
+  flowchart TD
+      Init["_start extracts envp<br>from stack pointer"] --> CopyEnv["mem_alloc space for<br>MAX_ENV strings"]
+      CopyEnv --> LoadArray["Deep copy initial<br>OS environment variables"]
+      
+      LoadArray --> Request{"User Request"}
+      
+      Request -->|export VAR=VAL| Export["Find empty slot or update<br>Set env_array[i] = 'VAR=VAL'"]
+      Request -->|env| Print["Loop and sys_write<br>all non-NULL slots"]
+      Request -->|Token expands $VAR| GetVal["Iterate env_array<br>Match prefix 'VAR='<br>Return pointer to 'VAL'"]
+      
+      Export --> Exec["Pass custom env_array<br>down to child sys_execve"]
+  ```
 
 ### 4. The Shell Pipeline (Parsing & Execution)
 
