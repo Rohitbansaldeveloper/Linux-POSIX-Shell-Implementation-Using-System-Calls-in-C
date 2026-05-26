@@ -46,6 +46,7 @@ void _start(void) {
     init_env(envp);   // Initialize dynamic environment variables
     setup_signals();  // Setup signal handlers (ignore Ctrl+C in parent)
     init_jobs();      // Setup job control structures
+    load_history();   // Load command history from disk
 
     // 3. Script Execution Mode
     if (argc > 1) {

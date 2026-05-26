@@ -12,9 +12,9 @@ struct linux_dirent64 {
     char           d_name[]; // Filename (null-terminated)
 };
 
-// Attempts to find a filename in the current directory that starts with 'prefix'.
+// Attempts to find a filename in the given directory that starts with 'prefix'.
 // Copies the matching filename into 'out_buffer' if found.
 // Returns 1 if a match is found, 0 otherwise.
-int autocomplete_match(const char *prefix, char *out_buffer, int max_len);
+int autocomplete_match_in_dir(const char *dir_path, const char *prefix, char *out_buffer, int max_len);
 
 #endif

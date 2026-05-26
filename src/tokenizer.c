@@ -10,6 +10,7 @@
 #include "string_utils.h"
 #include "env.h"
 #include "memory.h"
+#include "alias.h"
 
 extern void execute_string(const char *str, int out_fd);
 
@@ -23,7 +24,7 @@ static int is_special(char c) {
     return c == '|' || c == '<' || c == '>' || c == '&' || c == ';' || c == '\n';
 }
 
-int tokenize(const char *input, Token *tokens, int max_tokens) {
+static int tokenize_internal(const char *input, Token *tokens, int max_tokens, int expand_aliases) {
     int count = 0;
     
     while (*input && count < max_tokens - 1) {
@@ -176,7 +177,21 @@ int tokenize(const char *input, Token *tokens, int max_tokens) {
                 if (val) {
                     str_cpy(tokens[count].value, val);
                 } else {
-                    tokens[count].value[0] = '\0'; // Empty string if not found
+                    tokens[count].value[0] = '\0';
+                }
+            }
+            
+            // Check for alias expansion
+            if (expand_aliases && (count == 0 || tokens[count-1].type == TOKEN_PIPE || tokens[count-1].type == TOKEN_AND || 
+                tokens[count-1].type == TOKEN_OR || tokens[count-1].type == TOKEN_SEMI || tokens[count-1].type == TOKEN_BACKGROUND ||
+                tokens[count-1].type == TOKEN_THEN || tokens[count-1].type == TOKEN_ELSE || tokens[count-1].type == TOKEN_DO)) {
+                char *alias_val = get_alias(tokens[count].value);
+                if (alias_val) {
+                    int added = tokenize_internal(alias_val, &tokens[count], max_tokens - count, 0); // 0 to prevent infinite recursion
+                    if (added > 0) {
+                        count += added;
+                    }
+                    continue; // Skip the regular count++ and keyword check
                 }
             }
             
@@ -196,4 +211,8 @@ int tokenize(const char *input, Token *tokens, int max_tokens) {
     // Mark the end of the token stream
     tokens[count].type = TOKEN_EOF;
     return count;
+}
+
+int tokenize(const char *input, Token *tokens, int max_tokens) {
+    return tokenize_internal(input, tokens, max_tokens, 1);
 }

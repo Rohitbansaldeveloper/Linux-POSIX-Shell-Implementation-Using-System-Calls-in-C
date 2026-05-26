@@ -8,6 +8,43 @@ size_t str_len(const char *str) {
     return len;
 }
 
+char *str_chr(const char *str, int c) {
+    while (*str) {
+        if (*str == c) return (char *)str;
+        str++;
+    }
+    return NULL;
+}
+
+char *str_str(const char *haystack, const char *needle) {
+    if (!*needle) return (char *)haystack;
+    while (*haystack) {
+        const char *h = haystack;
+        const char *n = needle;
+        while (*h && *n && *h == *n) {
+            h++;
+            n++;
+        }
+        if (!*n) return (char *)haystack;
+        haystack++;
+    }
+    return NULL;
+}
+
+int glob_match(const char *pattern, const char *str) {
+    if (*pattern == '\0') return *str == '\0';
+    if (*pattern == '*') {
+        if (glob_match(pattern + 1, str)) return 1;
+        if (*str != '\0' && glob_match(pattern, str + 1)) return 1;
+        return 0;
+    }
+    if (*pattern == '?' || *pattern == *str) {
+        if (*str == '\0') return 0;
+        return glob_match(pattern + 1, str + 1);
+    }
+    return 0;
+}
+
 int str_cmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) {
         s1++;

@@ -1,16 +1,18 @@
 CC = gcc
 CFLAGS = -Wall -Wextra -nostdlib -fno-builtin -static -Os -I./src
-SRC = $(wildcard src/*.c)
-OBJ = $(SRC:.c=.o)
+SRCS = src/main.c src/syscalls.c src/string_utils.c src/memory.c \
+       src/dirent.c src/terminal.c src/env.c src/tokenizer.c src/parser.c \
+       src/executor.c src/builtins.c src/signals.c src/jobs.c src/alias.c
+OBJS = $(SRCS:.c=.o)
 TARGET = minishell
 
 all: $(TARGET)
 
-$(TARGET): $(OBJ)
+$(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f $(OBJS) $(TARGET)

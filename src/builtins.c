@@ -3,6 +3,7 @@
 #include "syscalls.h"
 #include "env.h"
 #include "jobs.h"
+#include "alias.h"
 
 int is_builtin(const char *cmd) {
     if (!cmd) return 0;
@@ -10,6 +11,8 @@ int is_builtin(const char *cmd) {
     if (str_cmp(cmd, "exit") == 0) return 1;
     if (str_cmp(cmd, "export") == 0) return 1;
     if (str_cmp(cmd, "unset") == 0) return 1;
+    if (str_cmp(cmd, "alias") == 0) return 1;
+    if (str_cmp(cmd, "unalias") == 0) return 1;
     if (str_cmp(cmd, "env") == 0) return 1;
     if (str_cmp(cmd, "jobs") == 0) return 1;
     if (str_cmp(cmd, "fg") == 0) return 1;
@@ -64,6 +67,24 @@ int execute_builtin(Command *cmd) {
             return -1;
         }
         unset_env_val(cmd->argv[1]);
+        return 0;
+    } else if (str_cmp(cmd->argv[0], "alias") == 0) {
+        if (cmd->argc == 1) {
+            print_aliases();
+            return 0;
+        }
+        char *arg = cmd->argv[1];
+        int i = 0;
+        while (arg[i] && arg[i] != '=') i++;
+        if (arg[i] == '=') {
+            arg[i] = '\0';
+            set_alias(arg, &arg[i+1]);
+        }
+        return 0;
+    } else if (str_cmp(cmd->argv[0], "unalias") == 0) {
+        if (cmd->argc > 1) {
+            unset_alias(cmd->argv[1]);
+        }
         return 0;
     } else if (str_cmp(cmd->argv[0], "env") == 0) {
         char **env_arr = get_env_array();

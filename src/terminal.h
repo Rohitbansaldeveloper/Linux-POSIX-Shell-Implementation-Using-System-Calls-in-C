@@ -15,6 +15,7 @@ int read_line_raw(const char *prompt, char *buffer, int max_len);
 
 // Add a line to history
 void add_history(const char *line);
+void load_history(void);
 
 // Terminal process group control
 int set_foreground_pgrp(int fd, int pgrp);

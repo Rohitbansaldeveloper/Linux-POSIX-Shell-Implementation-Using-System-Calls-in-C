@@ -9,15 +9,11 @@
 #include "syscalls.h"
 #include "string_utils.h"
 
-// O_DIRECTORY ensures the open call fails if the target is not a directory.
-#define O_RDONLY    00
-#define O_DIRECTORY 0200000
-
 #define BUF_SIZE 4096
 
-int autocomplete_match(const char *prefix, char *out_buffer, int max_len) {
-    // Open the current working directory
-    int fd = sys_open(".", O_RDONLY | O_DIRECTORY, 0);
+int autocomplete_match_in_dir(const char *dir_path, const char *prefix, char *out_buffer, int max_len) {
+    // Open the given directory
+    int fd = sys_open(dir_path, O_RDONLY | O_DIRECTORY, 0);
     if (fd < 0) return 0;
     
     char buf[BUF_SIZE];

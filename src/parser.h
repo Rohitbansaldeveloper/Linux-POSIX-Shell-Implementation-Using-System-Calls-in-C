@@ -12,7 +12,11 @@ typedef struct {
     char *redirect_in;
     char *redirect_out;
     int append_out;
-    int merge_stderr;
+    int fd_redirs_count;
+    struct {
+        int source_fd;
+        int target_fd;
+    } fd_redirs[4];
     char *heredoc_delimiter;
 } Command;
 

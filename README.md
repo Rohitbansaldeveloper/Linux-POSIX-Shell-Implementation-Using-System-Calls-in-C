@@ -6,6 +6,16 @@ This is a true systems programming project. It bypasses high-level wrappers like
 
 ---
 
+## ✨ Advanced Features
+
+* **Persistent History & Reverse Search (`Ctrl+R`)**: Command history is saved to `~/.minishell_history` using raw `sys_open`/`sys_read`/`sys_write`. A live interactive reverse-i-search is built directly into the raw TTY terminal driver!
+* **$PATH Auto-Completion**: Pressing `TAB` on the first word of a command dynamically searches all directories in your `$PATH` using `sys_getdents64` to provide live executable autocompletion.
+* **Wildcard Globbing (`*`, `?`)**: A custom recursive regex-like glob matching engine built entirely from scratch expands wildcards before passing arguments to `sys_execve`.
+* **Custom Aliases**: Supports `alias name=value` and `unalias name`. The tokenizer recursively expands aliases inline during lexical analysis before the AST is built!
+* **Generalized FD Redirection (`N>&M`)**: Lexes and parses complex file descriptor duplications, utilizing an array of custom `sys_dup2` routings in the execution engine.
+
+---
+
 ## 🏗️ Architecture & Flow Diagram
 
 The shell operates through a standard Read-Eval-Print Loop (REPL), breaking down raw text into actionable system processes.

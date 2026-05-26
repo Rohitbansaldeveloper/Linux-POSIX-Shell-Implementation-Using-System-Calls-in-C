@@ -34,7 +34,7 @@ static ASTNode *parse_pipeline(void) {
     cmd->redirect_in = NULL;
     cmd->redirect_out = NULL;
     cmd->append_out = 0;
-    cmd->merge_stderr = 0;
+    cmd->fd_redirs_count = 0;
     cmd->heredoc_delimiter = NULL;
     p->num_commands = 1;
     
@@ -59,8 +59,9 @@ static ASTNode *parse_pipeline(void) {
             cmd->redirect_in = NULL;
             cmd->redirect_out = NULL;
             cmd->append_out = 0;
-            cmd->merge_stderr = 0;
+            cmd->fd_redirs_count = 0;
             cmd->heredoc_delimiter = NULL;
+            cmd->fd_redirs_count = 0;
         } else if (t->type == TOKEN_REDIRECT_IN) {
             if (peek()->type == TOKEN_WORD) cmd->redirect_in = consume()->value;
         } else if (t->type == TOKEN_REDIRECT_OUT || t->type == TOKEN_REDIRECT_APPEND) {
@@ -69,7 +70,23 @@ static ASTNode *parse_pipeline(void) {
                 cmd->append_out = (t->type == TOKEN_REDIRECT_APPEND);
             }
         } else if (t->type == TOKEN_REDIRECT_STDERR) {
-            cmd->merge_stderr = 1;
+            if (cmd->fd_redirs_count < 4) {
+                int source = 0;
+                int target = 0;
+                int i = 0;
+                while (t->value[i] >= '0' && t->value[i] <= '9') {
+                    source = source * 10 + (t->value[i] - '0');
+                    i++;
+                }
+                while (t->value[i] == '>' || t->value[i] == '&' || t->value[i] == '<') i++;
+                while (t->value[i] >= '0' && t->value[i] <= '9') {
+                    target = target * 10 + (t->value[i] - '0');
+                    i++;
+                }
+                cmd->fd_redirs[cmd->fd_redirs_count].source_fd = source;
+                cmd->fd_redirs[cmd->fd_redirs_count].target_fd = target;
+                cmd->fd_redirs_count++;
+            }
         } else if (t->type == TOKEN_HEREDOC) {
             if (peek()->type == TOKEN_WORD) cmd->heredoc_delimiter = consume()->value;
         } else if (t->type == TOKEN_BACKGROUND) {

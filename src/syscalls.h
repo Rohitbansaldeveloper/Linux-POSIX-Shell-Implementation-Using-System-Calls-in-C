@@ -57,6 +57,15 @@ int sys_setpgid(pid_t pid, pid_t pgid);
 pid_t sys_getpgrp(void);
 pid_t sys_getpid(void);
 
+/* File Open Flags */
+#define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_CREAT  64
+#define O_TRUNC  512
+#define O_APPEND 1024
+#define O_DIRECTORY 0200000
+
 /* Signal types */
 #define SIGINT   2
 #define SIGQUIT  3

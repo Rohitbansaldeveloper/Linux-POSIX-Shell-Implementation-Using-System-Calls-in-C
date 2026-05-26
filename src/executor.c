@@ -17,13 +17,6 @@
 #include "signals.h"
 #include "terminal.h"
 
-// Constants for open() syscall
-#define O_RDONLY 00     // Open for reading only
-#define O_WRONLY 01     // Open for writing only
-#define O_CREAT  0100   // Create file if it does not exist
-#define O_TRUNC  01000  // Truncate file to zero length if it exists
-#define O_APPEND 02000  // Append to the file (writes always append)
-
 /*
  * Resolves a command name (e.g. "ls") to a full absolute path (e.g. "/bin/ls").
  * If the command already contains a slash, it's treated as a direct path.
@@ -69,11 +62,76 @@ static char *find_executable(const char *cmd) {
     return (char *)cmd; // Return original if not found
 }
 
+static void expand_command_args(Command *cmd) {
+    char *new_argv[256];
+    int new_argc = 0;
+    
+    for (int i = 0; i < cmd->argc; i++) {
+        if (str_chr(cmd->argv[i], '*') != NULL || str_chr(cmd->argv[i], '?') != NULL) {
+            int fd = sys_open(".", O_RDONLY | O_DIRECTORY, 0);
+            int match_found = 0;
+            if (fd >= 0) {
+                char buf[4096];
+                while (1) {
+                    int nread = sys_getdents64(fd, buf, sizeof(buf));
+                    if (nread <= 0) break;
+                    
+                    int bpos = 0;
+                    while (bpos < nread) {
+                        // Cast the raw bytes at the current offset to the dirent structure
+                        struct linux_dirent64 {
+                            unsigned long  d_ino;    
+                            long           d_off;    
+                            unsigned short d_reclen; 
+                            unsigned char  d_type;   
+                            char           d_name[]; 
+                        };
+                        struct linux_dirent64 *d = (struct linux_dirent64 *)(buf + bpos);
+                        
+                        if (str_cmp(d->d_name, ".") != 0 && str_cmp(d->d_name, "..") != 0) {
+                            if (glob_match(cmd->argv[i], d->d_name)) {
+                                if (new_argc < 255) {
+                                    int len = str_len(d->d_name);
+                                    char *dup = mem_alloc(len + 1);
+                                    str_cpy(dup, d->d_name);
+                                    new_argv[new_argc++] = dup;
+                                    match_found = 1;
+                                }
+                            }
+                        }
+                        bpos += d->d_reclen;
+                    }
+                }
+                sys_close(fd);
+            }
+            if (!match_found && new_argc < 255) {
+                new_argv[new_argc++] = cmd->argv[i];
+            }
+        } else {
+            if (new_argc < 255) {
+                new_argv[new_argc++] = cmd->argv[i];
+            }
+        }
+    }
+    
+    new_argv[new_argc] = NULL;
+    for (int i = 0; i < new_argc; i++) {
+        cmd->argv[i] = new_argv[i];
+    }
+    cmd->argv[new_argc] = NULL;
+    cmd->argc = new_argc;
+}
+
 /*
  * Executes a pipeline of commands (e.g. "cat file.txt | grep error | wc -l > out.txt").
  */
 int execute_pipeline(Pipeline *pipeline) {
     if (pipeline->num_commands == 0) return 0;
+    
+    // Expand globs in arguments
+    for (int i = 0; i < pipeline->num_commands; i++) {
+        expand_command_args(&pipeline->commands[i]);
+    }
     
     // Special case: Single builtin command (e.g., "cd /tmp").
     if (pipeline->num_commands == 1 && is_builtin(pipeline->commands[0].argv[0])) {
@@ -188,9 +246,9 @@ int execute_pipeline(Pipeline *pipeline) {
                 sys_close(fd);
             }
             
-            // 4. Handle stderr merging ('2>&1')
-            if (cmd->merge_stderr) {
-                sys_dup2(1, 2);
+            // 4. Handle arbitrary FD redirection (N>&M)
+            for (int k = 0; k < cmd->fd_redirs_count; k++) {
+                sys_dup2(cmd->fd_redirs[k].target_fd, cmd->fd_redirs[k].source_fd);
             }
 
             // 5. Execute the command
